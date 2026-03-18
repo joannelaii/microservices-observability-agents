@@ -3,8 +3,10 @@ from dotenv import load_dotenv
 
 from sop_agent.graph import build_sop_graph
 
-def run_sop_agent(telemetry: str, sop_dir: str | None = None) -> dict:
-    load_dotenv()
+load_dotenv()
+
+
+def run_sop_agent(telemetry: str, sop_dir: str | None = None):
 
     if sop_dir is None:
         sop_dir = os.path.join(os.path.dirname(__file__), "..", "sops")
@@ -15,7 +17,8 @@ def run_sop_agent(telemetry: str, sop_dir: str | None = None) -> dict:
         {
             "telemetry": telemetry,
             "retrieved_sops": [],
-            "answer": "",
-        }
+        },
+        print_mode="messages",
     )
     return result
+
