@@ -6,43 +6,22 @@ from langgraph.graph import StateGraph, START, END
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
 from sop_agent.prompts import SOP_AGENT_SYSTEM_PROMPT
-from sop_agent.sop_store import SOPStore, RetrievedSOP
+from sop_agent.sop_store import SOPStore
 
 
 class SOPState(TypedDict):
     telemetry: str
-    retrieved_sops: list[
-        dict[str, str]
-    ]  # format: [{"source": "...", "content": "..."}]
 
 
 def build_sop_graph(sop_dir: str):
     index_dir = os.path.join(sop_dir, ".faiss_index")
-    store = SOPStore(sop_dir=sop_dir, index_dir=index_dir)
-
-    def retrieve_node(state: SOPState) -> dict[str, list[dict[str, str]]]:
-        query = state["telemetry"]
-        hits = store.search(query, k=4)
-        return {"retrieved_sops": [dict(h) for h in hits]}
+    store = SOPStore(sop_dir, index_dir, search_kwargs={"k": 4})
 
     def sop_reasoning_node(state: SOPState) -> dict[str, Any]:
         telemetry = state["telemetry"]
-        sops = state["retrieved_sops"]
-
-        sop_context_blocks = [
-            f"[SOP EXCERPT {i}]\nSOURCE: {s['source']}\n{s['content']}"
-            for i, s in enumerate(sops, start=1)
-        ]
-        sop_context = (
-            "\n\n".join(sop_context_blocks) if sop_context_blocks else "(none)"
-        )
-
         user_prompt = f"""\
         Telemetry / symptoms:
         {telemetry}
-
-        Relevant SOP excerpts:
-        {sop_context}
 
         Task:
         Produce a numbered debugging checklist strictly based on the SOP excerpts.
@@ -55,18 +34,15 @@ def build_sop_graph(sop_dir: str):
             HumanMessage(content=user_prompt),
         ]
 
-        resp = llm.invoke(messages)
+        resp = llm.bind_tools([store.retrieve_docs]).invoke(messages)
         return {"answer": resp.content}
 
-    RETRIEVE_SOPS = "retrieve_sops"
     APPLY_SOPS = "apply_sops"
 
     graph = StateGraph(SOPState)
-    graph.add_node(RETRIEVE_SOPS, retrieve_node)
     graph.add_node(APPLY_SOPS, sop_reasoning_node)
 
-    graph.add_edge(START, RETRIEVE_SOPS)
-    graph.add_edge(RETRIEVE_SOPS, APPLY_SOPS)
+    graph.add_edge(START, APPLY_SOPS)
     graph.add_edge(APPLY_SOPS, END)
 
     return graph.compile()
