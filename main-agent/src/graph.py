@@ -8,6 +8,19 @@ from .nodes import (
     run_summariser_node
 )
 
+def route_next(state: DiagnosticState) -> str:
+    
+    action = state.get("next_action", "")
+    
+    if "CALL_SOP" in action:
+        return "sop_agent"
+    elif "CALL_CODE" in action:
+        return "code_expert"
+    elif "CALL_REASONING" in action:
+        return "reasoning"
+    else:
+        return "summariser"
+    
 def build_graph() -> StateGraph:
     graph = StateGraph(DiagnosticState)
 
@@ -20,10 +33,12 @@ def build_graph() -> StateGraph:
 
     # Adjust flow accordingly
     graph.add_edge(START, "main")
-    graph.add_edge("main", "sop_agent")
-    graph.add_edge("sop_agent",   "code_expert")
-    graph.add_edge("code_expert", "reasoning")
-    graph.add_edge("reasoning",   "summariser")
+    graph.add_conditional_edges("main", route_next)
+
+    # Every agent reports back to MainAgent after finishing
+    graph.add_edge("sop_agent",   "main")
+    graph.add_edge("code_expert", "main")
+    graph.add_edge("reasoning",   "main")
     graph.add_edge("summariser",  END)
 
     return graph.compile()
