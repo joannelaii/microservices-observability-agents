@@ -25,10 +25,10 @@ def build_sop_graph(sop_dir: str):
     llm = config["llm"]
     store = SOPStore(embeddings, sop_dir=sop_dir, index_dir=index_dir)
 
-    def retrieve_node(state: SOPState) -> dict[str, list[dict[str, str]]]:
+    def retrieve_node(state: SOPState) -> dict[str, list[RetrievedSOP]]:
         query = state["telemetry"]
         hits = store.search(query, k=4)
-        return {"retrieved_sops": [dict(h) for h in hits]}
+        return {"retrieved_sops": hits}
 
     def sop_reasoning_node(state: SOPState) -> dict[str, Any]:
         telemetry = state["telemetry"]

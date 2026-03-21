@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, asdict
+from typing import TypedDict
 
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
 from langchain_community.vectorstores import FAISS
@@ -10,14 +10,9 @@ from langchain_openai import OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 
-@dataclass
-class RetrievedSOP:
+class RetrievedSOP(TypedDict):
     source: str
     content: str
-
-    def __iter__(self):
-        for k, v in asdict(self).items():
-            yield ((k, v))
 
 
 class SOPStore:
