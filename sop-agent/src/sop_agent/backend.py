@@ -15,23 +15,23 @@ class LLM_EMBEDDING(TypedDict):
 
 
 def llm_and_embeddings() -> LLM_EMBEDDING:
-    __endpoint = os.environ.get("OLLAMA_ENDPOINT")
-    if __endpoint:
-        __token = os.environ.get("OLLAMA_TOKEN")
-        headers = {"X-Tunnel-Authorization": f"tunnel {__token}"}
+    if "OPENAI_API_KEY" in os.environ:
         return {
-            "embeddings": OllamaEmbeddings(
-                model=OLLAMA_MODEL,
-                base_url=__endpoint,
-                client_kwargs={"headers": headers},
-            ),
-            "llm": ChatOllama(
-                model=OLLAMA_MODEL,
-                base_url=__endpoint,
-                client_kwargs={"headers": headers},
-            ),
+            "embeddings": OpenAIEmbeddings(),
+            "llm": ChatOpenAI(model="gpt-4o-mini", temperature=0),
         }
+    __endpoint = os.environ.get("OLLAMA_ENDPOINT")
+    __token = os.environ.get("OLLAMA_TOKEN")
+    headers = {"X-Tunnel-Authorization": f"tunnel {__token}"}
     return {
-        "embeddings": OpenAIEmbeddings(),
-        "llm": ChatOpenAI(model="gpt-4o-mini", temperature=0),
+        "embeddings": OllamaEmbeddings(
+            model=OLLAMA_MODEL,
+            base_url=__endpoint,
+            client_kwargs={"headers": headers},
+        ),
+        "llm": ChatOllama(
+            model=OLLAMA_MODEL,
+            base_url=__endpoint,
+            client_kwargs={"headers": headers},
+        ),
     }
