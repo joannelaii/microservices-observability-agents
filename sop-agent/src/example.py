@@ -34,4 +34,5 @@ print("Running SOP agent with telemetry")
 result = run_sop_agent(telemetry)
 
 print("SOP agent results:\n")
-print(result["answer"])
+print(result)
+

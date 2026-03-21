@@ -14,11 +14,7 @@ def run_sop_agent(telemetry: str, sop_dir: str | None = None):
 
     graph = build_sop_graph(sop_dir)
     result = graph.invoke(
-        {
-            "telemetry": telemetry,
-            "retrieved_sops": [],
-        },
-        print_mode="messages",
+        {"telemetry": telemetry, "answer": ""},
+        print_mode="updates",
     )
     return result
-
