@@ -1,8 +1,8 @@
 from typing import Optional, TypedDict
 
-class MainAgentState(TypedDict):
+class DiagnosticState(TypedDict):
     # Input
-    alert: str
+    telemetry: str
     service_name: str
 
     # Main agent instructions
@@ -12,6 +12,9 @@ class MainAgentState(TypedDict):
     sop_guidance: Optional[str]
     code_analysis: Optional[str]
     reasoning_output: Optional[str]
+
+    root_cause_found: bool
+    next_action: Optional[str]
 
     # Final output
     summary: Optional[str]
