@@ -3,8 +3,8 @@ from __future__ import annotations
 import os
 from typing import Any, TypedDict
 from langgraph.graph import StateGraph, START, END
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
+from sop_agent.backend import llm_and_embeddings
 from sop_agent.prompts import SOP_AGENT_SYSTEM_PROMPT
 from sop_agent.sop_store import SOPStore, RetrievedSOP
 
@@ -14,11 +14,16 @@ class SOPState(TypedDict):
     retrieved_sops: list[
         dict[str, str]
     ]  # format: [{"source": "...", "content": "..."}]
+    answer: str
 
 
 def build_sop_graph(sop_dir: str):
     index_dir = os.path.join(sop_dir, ".faiss_index")
-    store = SOPStore(sop_dir=sop_dir, index_dir=index_dir)
+
+    config = llm_and_embeddings()
+    embeddings = config["embeddings"]
+    llm = config["llm"]
+    store = SOPStore(embeddings, sop_dir=sop_dir, index_dir=index_dir)
 
     def retrieve_node(state: SOPState) -> dict[str, list[dict[str, str]]]:
         query = state["telemetry"]
@@ -49,7 +54,6 @@ def build_sop_graph(sop_dir: str):
         If SOP excerpts are insufficient, ask a maximum of 3 targeted questions to request missing info.
         """
 
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
         messages = [
             SystemMessage(content=SOP_AGENT_SYSTEM_PROMPT),
             HumanMessage(content=user_prompt),
