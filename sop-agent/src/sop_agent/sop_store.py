@@ -5,6 +5,7 @@ from dataclasses import dataclass, asdict
 
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
 from langchain_community.vectorstores import FAISS
+from langchain_core.embeddings import Embeddings
 from langchain_openai import OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -22,15 +23,13 @@ class RetrievedSOP:
 class SOPStore:
     _vs: FAISS
 
-    def __init__(self, sop_dir: str, index_dir: str) -> None:
+    def __init__(self, embeddings: Embeddings, sop_dir: str, index_dir: str) -> None:
         """
         builds or loads the store from the specified directory
         """
         os.makedirs(index_dir, exist_ok=True)
         index_file = os.path.join(index_dir, "index.faiss")
         store_file = os.path.join(index_dir, "index.pkl")
-
-        embeddings = OpenAIEmbeddings()
 
         # If index exists, load it
         if os.path.exists(index_file) and os.path.exists(store_file):

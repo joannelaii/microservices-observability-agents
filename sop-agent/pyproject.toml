@@ -8,6 +8,7 @@ dependencies = [
     "faiss-cpu>=1.13.2",
     "langchain-community>=0.4.1",
     "langchain-core>=1.2.19",
+    "langchain-ollama>=1.0.1",
     "langchain-openai>=1.1.11",
     "langgraph>=1.1.2",
     "python-dotenv>=1.2.2",

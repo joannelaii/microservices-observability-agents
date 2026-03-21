@@ -17,8 +17,7 @@ def run_sop_agent(telemetry: str, sop_dir: str | None = None):
         {
             "telemetry": telemetry,
             "retrieved_sops": [],
+            "answer": "",
         },
-        print_mode="messages",
     )
     return result
-
