@@ -1,9 +1,9 @@
 [project]
-name = "sop_agent"
+name = "main-agent"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12,<3.14"
 dependencies = [
     "faiss-cpu>=1.13.2",
     "langchain-community>=0.4.1",
@@ -12,4 +12,13 @@ dependencies = [
     "langchain-openai>=1.1.11",
     "langgraph>=1.1.2",
     "python-dotenv>=1.2.2",
+    "sop-agent",
 ]
+
+[tool.uv.workspace]
+members = [
+    "sop-agent",
+]
+
+[tool.uv.sources]
+sop-agent = { workspace = true, editable = true }
