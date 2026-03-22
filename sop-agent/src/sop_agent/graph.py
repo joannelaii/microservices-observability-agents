@@ -17,7 +17,11 @@ class SOPState(TypedDict):
     answer: str
 
 
-def build_sop_graph(sop_dir: str):
+def build_sop_graph(sop_dir: str | None = None):
+    if sop_dir is None:
+        sop_dir = os.path.join(os.path.dirname(__file__), "..", "sops")
+        sop_dir = os.path.abspath(sop_dir)
+
     index_dir = os.path.join(sop_dir, ".faiss_index")
 
     config = llm_and_embeddings()
