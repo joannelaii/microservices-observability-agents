@@ -11,17 +11,14 @@ from langchain_community.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+from src.backend import llm_and_embeddings
+
 load_dotenv()
+
 
 class RetrievedSOP(TypedDict):
     source: str
     content: str
-
-
-def get_embeddings() -> Embeddings:
-    if "OPENAI_API_KEY" not in os.environ:
-        raise ValueError("OPENAI_API_KEY not found in environment")
-    return OpenAIEmbeddings()
 
 
 class SOPStore:
@@ -93,7 +90,7 @@ _DEFAULT_SOP_DIR = os.path.abspath(
 )
 _INDEX_DIR = os.path.join(_DEFAULT_SOP_DIR, ".faiss_index")
 
-_embeddings = get_embeddings()
+_embeddings = llm_and_embeddings()["embeddings"]
 _store = SOPStore(
     embeddings=_embeddings,
     sop_dir=_DEFAULT_SOP_DIR,
@@ -127,3 +124,4 @@ def retrieve_sop(query: str) -> dict:
 #     test_query = "payment service timeout and 5xx errors"
 #     result = retrieve_sop.invoke({"query": test_query})
 #     print(result)
+

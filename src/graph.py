@@ -1,44 +1,70 @@
 from langgraph.graph import StateGraph, START, END
+from langgraph.prebuilt import ToolNode
+
+from src.tools.sop import retrieve_sop
+from src.tools.telemetry import get_relevant_telemetry
 from .state import DiagnosticState
 from .nodes import (
+    run_best_effort_node,
     run_main_agent_node,
-    run_sop_node,
     run_code_expert_node,
     run_reasoning_node,
-    run_summariser_node
+    run_summariser_node,
+    triage_node,
 )
 
+MAIN_NODE = "main_node"
+TRIAGE_NODE = "triage_node"
+REASONING_NODE = "reasoning_node"
+CODING_NODE = "coding_node"
+SOP_TOOL = "sop_tool"
+TELEMETRY_TOOL = "telemetry_tool"
+DIAGNOSIS = "synthesize_diagnosis"
+BEST_EFFORT = "synthesize_best_effort"
+
+
 def route_next(state: DiagnosticState) -> str:
-    
-    action = state.get("next_action", "")
-    
-    if "CALL_SOP" in action:
-        return "sop_agent"
-    elif "CALL_CODE" in action:
-        return "code_expert"
-    elif "CALL_REASONING" in action:
-        return "reasoning"
-    else:
-        return "summariser"
-    
-def build_graph() -> StateGraph:
+    action = state["next_action"]
+
+    if action in [CODING_NODE, TELEMETRY_TOOL, DIAGNOSIS, BEST_EFFORT]:
+        return action
+
+    raise ValueError("action not found")
+
+
+def build_graph():
     graph = StateGraph(DiagnosticState)
 
+    # add tool nodes
+    graph.add_node(SOP_TOOL, ToolNode([retrieve_sop]))
+    graph.add_node(TELEMETRY_TOOL, ToolNode([get_relevant_telemetry]))
+
     # Add nodes
-    graph.add_node("main", run_main_agent_node)
-    graph.add_node("sop_agent", run_sop_node)
-    graph.add_node("code_expert", run_code_expert_node)
-    graph.add_node("reasoning", run_reasoning_node)
-    graph.add_node("summariser", run_summariser_node)
+    graph.add_node(MAIN_NODE, run_main_agent_node)
+    # TODO: write triage_node function
+    graph.add_node(TRIAGE_NODE, triage_node)
+    graph.add_node(REASONING_NODE, run_reasoning_node)
+    graph.add_node(CODING_NODE, run_code_expert_node)
+    graph.add_node(DIAGNOSIS, run_summariser_node)
+    # TODO: write best_effort function
+    graph.add_node(BEST_EFFORT, run_best_effort_node)
 
     # Adjust flow accordingly
-    graph.add_edge(START, "main")
-    graph.add_conditional_edges("main", route_next)
+    graph.add_edge(START, MAIN_NODE)
+    graph.add_edge(MAIN_NODE, SOP_TOOL)
+    # TODO: add triage edge between MAIN_NODE and SOP_TOOL
+    # graph.add_edge(MAIN_NODE, TRIAGE_NODE)
+    # graph.add_edge(TRIAGE_NODE, SOP_TOOL)
+    graph.add_edge(SOP_TOOL, REASONING_NODE)
+    graph.add_conditional_edges(REASONING_NODE, route_next)
+    # TODO: Check if telemetry_tool can be called with this conditional edge
 
-    # Every agent reports back to MainAgent after finishing
-    graph.add_edge("sop_agent",   "main")
-    graph.add_edge("code_expert", "main")
-    graph.add_edge("reasoning",   "main")
-    graph.add_edge("summariser",  END)
+    # loop nodes
+    graph.add_edge(TELEMETRY_TOOL, REASONING_NODE)
+    graph.add_edge(CODING_NODE, REASONING_NODE)
+
+    # ending nodes
+    graph.add_edge(DIAGNOSIS, END)
+    graph.add_edge(BEST_EFFORT, END)
 
     return graph.compile()
