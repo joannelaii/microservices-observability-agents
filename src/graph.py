@@ -51,10 +51,9 @@ def build_graph():
 
     # Adjust flow accordingly
     graph.add_edge(START, MAIN_NODE)
-    graph.add_edge(MAIN_NODE, SOP_TOOL)
     # TODO: add triage edge between MAIN_NODE and SOP_TOOL
-    # graph.add_edge(MAIN_NODE, TRIAGE_NODE)
-    # graph.add_edge(TRIAGE_NODE, SOP_TOOL)
+    graph.add_edge(MAIN_NODE, TRIAGE_NODE)
+    graph.add_edge(TRIAGE_NODE, SOP_TOOL)
     graph.add_edge(SOP_TOOL, REASONING_NODE)
     graph.add_conditional_edges(REASONING_NODE, route_next)
     # TODO: Check if telemetry_tool can be called with this conditional edge
