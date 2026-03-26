@@ -2,7 +2,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from src.backend import llm_and_embeddings
-from .prompts import MAIN_AGENT_SYSTEM_PROMPT, SUMMARISER_SYSTEM_PROMPT
+from .prompts import CODING_AGENT_SYSTEM_PROMPT, MAIN_AGENT_SYSTEM_PROMPT, REASONING_AGENT_SYSTEM_PROMPT, SUMMARISER_SYSTEM_PROMPT
 from .state import DiagnosticState
 import os
 from dotenv import load_dotenv
@@ -65,28 +65,73 @@ def triage_node(state: DiagnosticState) -> DiagnosticState:
 #     return {**state, "sop_guidance": result.get("answer", "")}
 
 
-# Code Expert Node, change to use code expert agent when implemented
+# Code Expert Node
 def run_code_expert_node(state: DiagnosticState) -> DiagnosticState:
-    # messages = []
-    # response = llm.invoke(messages)
-    # return {**state, "code_analysis": response.content}
+    coding_task = state.get("coding_task") or "Analyse the available telemetry and write a focused diagnostic script."
+
+    messages = [
+        SystemMessage(content=CODING_AGENT_SYSTEM_PROMPT),
+        HumanMessage(
+            content=f"""
+            ## Incident Context
+            Service: {state["service_name"]}
+            Alert / Telemetry: {state["telemetry"]}
+
+            ## SOP Guidance
+            {state.get("sop_guidance") or "None"}
+
+            ## Task from Reasoning Agent
+            {coding_task}
+
+            Write the Python code (e.g. function/script) required to accomplish this task.
+            """
+        ),
+    ]
+    response = llm.invoke(messages)
     print("==========Code Expert==========")
-    # print(f"Code Generated:\n {response.content}")
-    return {**state, "code_analysis": "STUB: Code expert not yet implemented"}
+    print(f"\nCode Expert response:\n{response.content}")
+    return {**state, "code_analysis": response.content}
 
 
-# Reasoning Node, change to use reasoning agent when implemented
+# Reasoning Node
 def run_reasoning_node(state: DiagnosticState) -> DiagnosticState:
-    # messages = []
-    # response = llm.invoke(messages)
-    # return {**state, "reasoning_output": response.content}
+    messages = [
+        SystemMessage(content=REASONING_AGENT_SYSTEM_PROMPT),
+        HumanMessage(
+            content=f"""
+            ## Incident
+            Service: {state["service_name"]}
+            Alert / Telemetry: {state["telemetry"]}
+
+            ## Evidence Gathered
+            SOP Guidance:
+            {state.get("sop_guidance") or "Not yet gathered"}
+
+            Code Analysis:
+            {state.get("code_analysis") or "Not yet gathered"}
+
+            Decide the next step to be carried out based on the information gathered so far.
+            """
+        ),
+    ]
+    response = llm.invoke(messages)
+    content = response.content.strip()
+
+    next_action = content.split("\n")[0].strip()
+
+    # extract coding task to pass to the coding agent for execution
+    coding_task = None
+    if "CODING TASK:" in content:
+        coding_task = content.split("CODING TASK:", 1)[1].strip()
+
     print("==========Reasoning Agent==========")
-    # print(f"Reasoning Agent returned:\n {response.content}")
-    # TODO: Bind tool call to llm invoke
+    print(f"\nReasoning Agent response:\n{content}")
+
     return {
         **state,
-        "reasoning_output": "STUB: Reasoning agent not yet implemented",
-        "root_cause_found": True,
+        "reasoning_output": content,
+        "next_action": next_action,
+        "coding_task": coding_task,
     }
 
 

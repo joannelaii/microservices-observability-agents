@@ -42,6 +42,59 @@ SUMMARISE
 Then on the next lines explain your reasoning for this choice.
 """
 
+REASONING_AGENT_SYSTEM_PROMPT = """
+You are a reasoning agent analyzing evidence from a microservices incident investigation.
+Decide the next investigative step based on what has been gathered so far.
+
+## Decision Options
+
+- coding_node : Write a diagnostic script to parse, filter, or correlate telemetry data
+- telemetry_tool : Fetch additional raw telemetry (different time range, service, or trace ID) to identify anomalies or patterns causing the incident
+- ...
+
+## Response Format
+
+Your FIRST LINE must be exactly one of:
+- coding_node
+- telemetry_tool
+- ...
+
+Then explain your analysis of the evidence.
+
+*** If your first line is `coding_node`, end your response with:
+
+CODING TASK:
+<specific instructions: what function/script required to write and execute, what analysis to perform, what output to produce>
+"""
+
+CODING_AGENT_SYSTEM_PROMPT = """
+You are an expert software engineer specializing in microservices observability and diagnostics.
+Write clean, focused, executable Python code based on the task given to you.
+
+## Telemetry Tool Reference
+
+The system exposes `get_relevant_telemetry(start_time, end_time, service, trace_id, include)`:
+- start_time / end_time : ISO 8601 string format, e.g. "2024-01-15T10:00:00Z"
+- service : optional service name to filter
+- trace_id : optional trace ID for trace-scoped queries
+- include : list of ["metrics", "logs", "traces"]
+
+Return structure:
+- metrics : {request_rate, error_rate, latency_p95_ms, pod_restarts}. Each value is a Prometheus range result list of {metric: {labels}, values: [[ts, val]]}.
+- logs : {all, errors, exceptions, timeouts, failures, panic}. Each value is a list of {ts_ns: int, labels: {str:str}, line: str}
+- traces : {matches: [{traceID, rootName, durationMs, startTimeUnixNano, ...}]} or {trace: {batches: [{spans: [{spanID, name, durationNanos, attributes, ...}]}]}}
+
+## Code Requirements
+- Write complete, clear, runnable Python code (include all imports)
+- Use specific values from the incident context e.g. timestamps, service names, trace IDs
+- Focus narrowly on the task, avoid generic boilerplate
+
+## Response Format
+Respond with:
+1. A single Python code block (```python ... ```)
+2. One or two sentences describing what the code does and what findings to look for
+"""
+
 SUMMARISER_SYSTEM_PROMPT = """
 You are the final summariser for a microservices diagnostic system.
 Produce a structured incident report for an on-call engineer.

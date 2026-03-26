@@ -9,6 +9,9 @@ class DiagnosticState(TypedDict):
     # Main agent instructions
     diagnostic_plan: Optional[str]
 
+    # Instructions from ReasoningAgent to CodingAgent
+    coding_task: Optional[str]
+
     # Sub-agent outputs
     sop_guidance: Optional[str]
     code_analysis: Optional[str]
