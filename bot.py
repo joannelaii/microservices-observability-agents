@@ -1,7 +1,10 @@
 import run_main_agent
+import re
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+from langchain_core.messages import HumanMessage
 from src.graph import build_graph
+import os
 
 
 class ObservabilityBotManager:
@@ -20,6 +23,7 @@ class ObservabilityBotManager:
 
         try:
             result = self.graph.invoke({
+                "messages": [HumanMessage(content=text)],
                 "telemetry": telemetry,
                 "service_name": service_name,
                 "trace_id": trace_id,
@@ -37,7 +41,7 @@ class ObservabilityBotManager:
             return self._format_response(summary)
 
         except Exception as e:
-            return f"❌ Error: {type(e).__name__}: {str(e)}"
+            return f" Error: {type(e).__name__}: {str(e)}"
 
     @staticmethod
     def _detect_trace_id(text: str) -> str | None:
@@ -59,6 +63,10 @@ class ObservabilityBotManager:
                 return text
             except ValueError:
                 pass
+
+        # Generic segmented trace token (e.g., abc-123-def-456)
+        if re.fullmatch(r"[A-Za-z0-9]+(?:-[A-Za-z0-9]+){2,}", text):
+            return text
         
         return None
 
@@ -85,7 +93,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command."""
     welcome = (
-        "👋 Welcome to Microservices Observability Bot!\n\n"
+        "Welcome to Microservices Observability Bot!\n\n"
         "Send me:\n"
         "• An alarm/alert description (e.g., 'high CPU, pod restarting')\n"
         "• A trace ID (e.g., 'abc123def456')\n\n"
@@ -98,7 +106,7 @@ def main():
     """Start the Telegram bot."""
     token = os.getenv("TELEGRAM_TOKEN")
     if not token:
-        print("❌ ERROR: TELEGRAM_TOKEN environment variable not set")
+        print("ERROR: TELEGRAM_TOKEN environment variable not set")
         return
 
     app = ApplicationBuilder().token(token).build()
@@ -107,7 +115,7 @@ def main():
     app.add_handler(CommandHandler("start", on_start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
     
-    print("🚀 Bot started (polling)")
+    print("Bot started (polling)")
     app.run_polling()
 
 
