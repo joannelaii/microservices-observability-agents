@@ -31,6 +31,14 @@ def route_next(state: DiagnosticState) -> str:
 
     raise ValueError("action not found")
 
+def route_triage(state: DiagnosticState) -> str:
+    action = state["triage"]
+
+    if action in [SOP_TOOL, TELEMETRY_TOOL]:
+        return action
+
+    raise ValueError("action not found")
+
 
 def build_graph():
     graph = StateGraph(DiagnosticState)
@@ -53,8 +61,12 @@ def build_graph():
     graph.add_edge(START, MAIN_NODE)
     # TODO: add triage edge between MAIN_NODE and SOP_TOOL
     graph.add_edge(MAIN_NODE, TRIAGE_NODE)
-    graph.add_edge(TRIAGE_NODE, SOP_TOOL)
+    # Triage routes to either SOP_TOOL (alarm flow) or TELEMETRY_TOOL (trace_id flow)
+    graph.add_conditional_edges(TRIAGE_NODE, route_triage)
+    # Both SOP and telemetry feed into reasoning
     graph.add_edge(SOP_TOOL, REASONING_NODE)
+    graph.add_edge(TELEMETRY_TOOL, REASONING_NODE)
+    # Conditional routing from reasoning (code expert, telemetry, or diagnosis)
     graph.add_conditional_edges(REASONING_NODE, route_next)
     # TODO: Check if telemetry_tool can be called with this conditional edge
 

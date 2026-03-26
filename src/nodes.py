@@ -1,11 +1,12 @@
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
 from src.backend import llm_and_embeddings
 from .prompts import MAIN_AGENT_SYSTEM_PROMPT, SUMMARISER_SYSTEM_PROMPT
 from .state import DiagnosticState
 import os
 from dotenv import load_dotenv
+import uuid
 
 load_dotenv()
 
@@ -47,10 +48,38 @@ def run_main_agent_node(state: DiagnosticState) -> DiagnosticState:
 
 def triage_node(state: DiagnosticState) -> DiagnosticState:
     """
-    triages the incident, should not be LLM
+    Triage logic to route between two flows:
+    1) Alarm-based: has telemetry -> call SOP_TOOL
+    2) User trace-id: has trace_id -> call TELEMETRY_TOOL to fetch relevant data
     """
-    # TODO: add tool call for SOP retrieval
-    return {**state, "tool_call": "STUB: Code expert not yet implemented"}
+    # Flow 1: User provided trace_id -> fetch telemetry for that trace
+    if state.get("trace_id") and state["trace_id"] is not None:
+        tool_call = {
+            "id": str(uuid.uuid4()),
+            "name": "get_relevant_telemetry",
+            "args": {"trace_id": state["trace_id"]}
+        }
+        print("==========Triage: TRACE_ID Flow==========\n")
+        return {
+            **state,
+            "messages": state["messages"] + [AIMessage(content="", tool_calls=[tool_call])],
+            "triage": "telemetry_tool"
+        }
+    
+    # Flow 2: Alarm triggered -> retrieve relevant SOP by telemetry
+    last_message = state["messages"][-1]
+    query = last_message.content if hasattr(last_message, 'content') else str(last_message)
+    tool_call = {
+        "id": str(uuid.uuid4()),
+        "name": "retrieve_sop",
+        "args": {"query": query}
+    }
+    print("==========Triage: ALARM Flow==========\n")
+    return {
+        **state,
+        "messages": state["messages"] + [AIMessage(content="", tool_calls=[tool_call])],
+        "triage": "sop_tool"
+    }
 
 
 # SOP Node
@@ -87,6 +116,8 @@ def run_reasoning_node(state: DiagnosticState) -> DiagnosticState:
         **state,
         "reasoning_output": "STUB: Reasoning agent not yet implemented",
         "root_cause_found": True,
+        # Hard coded next action for testing but I think there needs to be some logic here to decide what the next action is since the graph uses a route_next function to determine the next node
+        "next_action": "synthesize_diagnosis",
     }
 
 
