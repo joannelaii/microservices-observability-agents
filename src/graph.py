@@ -14,6 +14,7 @@ from .nodes import (
 )
 
 MAIN_NODE = "main_node"
+SUMMARIZER_NODE = "summarizer_node"
 TRIAGE_NODE = "triage_node"
 REASONING_NODE = "reasoning_node"
 CODING_NODE = "coding_node"
@@ -27,14 +28,6 @@ def route_next(state: DiagnosticState) -> str:
     action = state["next_action"]
 
     if action in [CODING_NODE, TELEMETRY_TOOL, DIAGNOSIS, BEST_EFFORT]:
-        return action
-
-    raise ValueError("action not found")
-
-def route_triage(state: DiagnosticState) -> str:
-    action = state["triage"]
-
-    if action in [SOP_TOOL, TELEMETRY_TOOL]:
         return action
 
     raise ValueError("action not found")
@@ -61,8 +54,8 @@ def build_graph():
     graph.add_edge(START, MAIN_NODE)
     # TODO: add triage edge between MAIN_NODE and SOP_TOOL
     graph.add_edge(MAIN_NODE, TRIAGE_NODE)
-    # Triage routes to either SOP_TOOL (alarm flow) or TELEMETRY_TOOL (trace_id flow)
-    graph.add_conditional_edges(TRIAGE_NODE, route_triage)
+    # Triage always routes to SOP_TOOL (rule-based severity classification handled by triage_node)
+    graph.add_edge(TRIAGE_NODE, SOP_TOOL)
     # Both SOP and telemetry feed into reasoning
     graph.add_edge(SOP_TOOL, REASONING_NODE)
     graph.add_edge(TELEMETRY_TOOL, REASONING_NODE)

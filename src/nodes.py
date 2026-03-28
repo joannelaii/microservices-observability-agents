@@ -12,73 +12,157 @@ load_dotenv()
 
 llm = llm_and_embeddings()["llm"]
 
+# Rule-based severity mapping
+_SEVERITY_KEYWORDS = {
+    "p1": [
+        "critical", "down", "unavailable", "outage", "crash", "oomkilled",
+        "crashloopbackoff", "5xx error rate", "service down", "total failure",
+    ],
+    "p2": [
+        "latency", "slow", "timeout", "error rate", "high cpu", "high memory",
+        "degraded", "performance", "connection pool", "queue",
+    ],
+    "p3": [
+        "warning", "minor", "informational", "debug",
+    ],
+}
+
+# Incident type keywords
+_INCIDENT_TYPE_KEYWORDS = {
+    "crash_loop": ["crashloopbackoff", "crash loop", "oomkilled", "pod restart"],
+    "latency": ["p95", "p99", "latency", "timeout", "slow", "response time"],
+    "error_rate": ["error rate", "5xx", "http error", "failed request", "http_errors"],
+    "memory": ["memory", "oom", "heap", "rss", "resident_memory"],
+    "cpu": ["cpu", "throttl", "cpu_seconds", "cpu usage"],
+    "database": ["database", "db", "postgres", "mysql", "query time", "connection pool"],
+    "network": ["network", "dns", "connection refused", "unreachable", "packet loss"],
+}
+
 
 def run_main_agent_node(state: DiagnosticState) -> DiagnosticState:
-    def check_for_key(key: str):
-        return "AVAILABLE" if state.get(key) else "NOT YET GATHERED"
-
-    messages = [
-        SystemMessage(content=MAIN_AGENT_SYSTEM_PROMPT),
-        HumanMessage(
-            content=f"""
-        Telemetry: {state["telemetry"]}
-        Service: {state["service_name"]}
-
-        ## Current State of Investigation
-        SOP Guidance:     {check_for_key("sop_guidance")}
-        Code Analysis:    {check_for_key("code_analysis")}
-        Reasoning Output: {check_for_key("reasoning_output")}
-
-        ## Latest Outputs
-        SOP Guidance: {state.get("sop_guidance", "None")}
-        Code Analysis: {state.get("code_analysis", "None")}
-        Reasoning: {state.get("reasoning_output", "None")}
-
-        Based on the above, what is the next action?
-        """
-        ),
-    ]
-    result = llm.invoke(messages)
-    next_action = result.content.strip().split("\n")[0].strip()
-    print("==========Main Agent==========")
-    print(f"\nMain Agent full response:\n {result.content}")
-
-    return {**state, "diagnostic_plan": result.content, "next_action": next_action}
+    """
+    LLM-based input formatter. Processes either:
+    1. Trace ID investigations: Format as "Investigate trace ID: {trace_id} over {time_window}"
+    2. Alert processing: Process alert text into investigation query
+    
+    Returns state with diagnostic_plan (formatted investigation query).
+    """
+    import sys
+    print("=== MAIN AGENT NODE ===", file=sys.stderr)
+    
+    # Check if this is a trace ID investigation
+    if state.get("trace_id"):
+        trace_id = state["trace_id"]
+        time_window = state.get("time_window", "5m")
+        
+        # Format investigation query for trace
+        query = f"Investigate trace ID: {trace_id} over {time_window}"
+        
+        print(f"[MAIN AGENT] Trace investigation: {query}", file=sys.stderr)
+        return {**state, "diagnostic_plan": query}
+    
+    # Otherwise, process alert input (from telemetry)
+    telemetry = state.get("telemetry", "")
+    if telemetry:
+        # Use LLM to format alert into investigation query
+        try:
+            messages = [
+                SystemMessage(content=MAIN_AGENT_SYSTEM_PROMPT),
+                HumanMessage(content=f"Alert to investigate:\n{telemetry}"),
+            ]
+            
+            response = llm.invoke(messages)
+            query = response.content if hasattr(response, 'content') else str(response)
+            
+            print(f"[MAIN AGENT] Alert investigation: {query}...", file=sys.stderr)
+            return {**state, "diagnostic_plan": query}
+        except Exception as e:
+            print(f"[MAIN AGENT] Error processing alert: {e}", file=sys.stderr)
+            # Fallback: use telemetry as-is
+            return {**state, "diagnostic_plan": telemetry, "error": str(e)}
+    
+    # Fallback: no trace ID or telemetry provided
+    return {**state, "diagnostic_plan": "No trace ID or alert telemetry provided"}
 
 
 def triage_node(state: DiagnosticState) -> DiagnosticState:
     """
-    Triage logic to route between two flows:
-    1) Alarm-based: has telemetry -> call SOP_TOOL
-    2) User trace-id: has trace_id -> call TELEMETRY_TOOL to fetch relevant data
+    Rule-based severity classifier. Uses keyword matching to determine:
+    - incident_type (latency, error_rate, memory, cpu, crash_loop, database, network, trace_investigation)
+    - severity (p1, p2, p3)
+    - query_window (derived from incident type)
+    - query (formatted investigation query)
     """
-    # Flow 1: User provided trace_id -> fetch telemetry for that trace
-    if state.get("trace_id") and state["trace_id"] is not None:
-        tool_call = {
-            "id": str(uuid.uuid4()),
-            "name": "get_relevant_telemetry",
-            "args": {"trace_id": state["trace_id"]}
+    import sys
+    
+    # For trace investigations, use fixed metadata
+    if state.get("trace_id"):
+        triage_metadata = {
+            "incident_type": "trace_investigation",
+            "severity": "p2",
+            "query_window": state.get("time_window", "1h"),
+            "query": (
+                f"Diagnose request failure using trace_id={state['trace_id']}. "
+                "Investigate error spans, downstream service failures, and latency spikes."
+            ),
         }
-        print("==========Triage: TRACE_ID Flow==========\n")
-        return {
-            **state,
-            "messages": state["messages"] + [AIMessage(content="", tool_calls=[tool_call])],
-            "triage": "telemetry_tool"
+    else:
+        # For alarms, classify by keyword matching
+        alarm_text = (state.get("telemetry") or "").lower()
+        
+        # Determine incident type by keyword matching
+        incident_type = "unknown"
+        for itype, keywords in _INCIDENT_TYPE_KEYWORDS.items():
+            if any(kw in alarm_text for kw in keywords):
+                incident_type = itype
+                break
+        
+        # Determine severity by keyword matching
+        severity = "p3"
+        for sev_level in ["p1", "p2"]:
+            if any(kw in alarm_text for kw in _SEVERITY_KEYWORDS[sev_level]):
+                severity = sev_level
+                break
+        
+        # Set query window based on incident type
+        query_window_map = {
+            "crash_loop": "10m",
+            "latency": "30m",
+            "error_rate": "15m",
+            "memory": "20m",
+            "cpu": "20m",
+            "database": "30m",
+            "network": "15m",
+        }
+        query_window = query_window_map.get(incident_type, "30m")
+        
+        # Build formatted query
+        query = f"Investigate {incident_type} issue from alert: {state.get('telemetry', '')[:200]}"
+        
+        triage_metadata = {
+            "incident_type": incident_type,
+            "severity": severity,
+            "query_window": query_window,
+            "query": query,
         }
     
-    # Flow 2: Alarm triggered -> retrieve relevant SOP by telemetry
-    last_message = state["messages"][-1]
-    query = last_message.content if hasattr(last_message, 'content') else str(last_message)
+    # Create tool call for SOP retrieval
+    query = triage_metadata["query"]
     tool_call = {
         "id": str(uuid.uuid4()),
         "name": "retrieve_sop",
-        "args": {"query": query}
+        "args": {"query": query},
     }
-    print("==========Triage: ALARM Flow==========\n")
+
+    print(f"==========Triage: {triage_metadata['incident_type'].upper()} [{triage_metadata['severity'].upper()}]===========", file=sys.stderr)
+    print(f"Triage Query: {triage_metadata}", file=sys.stderr)
+    
+
     return {
         **state,
-        "messages": state["messages"] + [AIMessage(content="", tool_calls=[tool_call])],
-        "triage": "sop_tool"
+        "messages": (state.get("messages") or []) + [AIMessage(content="", tool_calls=[tool_call])],
+        "triage": "sop_tool",
+        "triage_metadata": triage_metadata,
     }
 
 
@@ -143,7 +227,7 @@ def run_summariser_node(state: DiagnosticState) -> DiagnosticState:
     ]
     response = llm.invoke(messages)
     print("==========Summariser Agent==========")
-    print(f"\nSummariser Agent returned:\n {response.content}")
+    # print(f"\nSummariser Agent returned:\n {response.content}")
     return {**state, "summary": response.content}
 
 

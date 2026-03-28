@@ -1,22 +1,20 @@
-from typing import Optional, TypedDict, List
+from typing import Optional, TypedDict, List, Any
 from langchain_core.messages import BaseMessage
 
 
 class DiagnosticState(TypedDict):
-    # Input messages
+    # Input
     messages: List[BaseMessage]
-
-    # Input (Alert)
     telemetry: str
     service_name: str
-
-    # Input (Trace ID)
     trace_id: Optional[str]
+    time_window: Optional[str]
 
-    # Main agent instructions
+    # Triage output: structured incident classification
+    triage_metadata: Optional[dict[str, Any]]
+
+    # Diagnostic pipeline outputs
     diagnostic_plan: Optional[str]
-
-    # Sub-agent outputs
     sop_guidance: Optional[str]
     code_analysis: Optional[str]
     reasoning_output: Optional[str]
