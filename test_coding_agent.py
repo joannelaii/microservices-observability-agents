@@ -30,7 +30,5 @@ state = {
 }
 
 if __name__ == "__main__":
-    print("Running Code Agent Node\n")
+    print("===Running Code Agent Node===\n")
     result = run_code_expert_node(state)
-    print("Output of code_analysis field\n")
-    print(result["code_analysis"])
