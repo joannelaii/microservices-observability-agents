@@ -30,6 +30,7 @@ class TelemetryConfig:
     max_log_lines: int = 200
     max_traces: int = 20
     default_rollup_window: str = "5m"
+    step: str = "30s"
 
 
 class HTTPClient:
@@ -315,6 +316,7 @@ def get_relevant_telemetry(
     trace_id: Optional[str] = None,
     include: Optional[list[str]] = None,
 ) -> Dict[str, Any]:
+    """Get relevant telemetry data for a service or trace ID."""
     return telemetry_service.collect(
         start_time=start_time,
         end_time=end_time,
