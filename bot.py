@@ -18,7 +18,6 @@ class ObservabilityBotManager:
         Automatically detects trace ID vs alarm text.
         """
         trace_id, parsed_window = self._extract_trace_and_window(text)
-        telemetry = text if not trace_id else f"Trace ID: {trace_id}"
         effective_window = parsed_window or time_window
 
         try:
@@ -52,6 +51,8 @@ class ObservabilityBotManager:
                 incident_title=incident_title,
                 triage_metadata=triage_metadata,
                 summary=summary,
+                trace_id=trace_id,
+                query_window=effective_window if trace_id else None,
             )
 
         except Exception as e:
@@ -163,21 +164,33 @@ class ObservabilityBotManager:
         return "\n".join(lines) or "No diagnosis available."
 
     @staticmethod
-    def _format_diagnosis_response(incident_title: str, triage_metadata: dict, summary: str) -> str:
+    def _format_diagnosis_response(
+        incident_title: str,
+        triage_metadata: dict,
+        summary: str,
+        trace_id: str | None = None,
+        query_window: str | None = None,
+    ) -> str:
         """Format structured diagnosis response similar to alert flow output."""
         incident_type = triage_metadata.get("incident_type", "unknown")
         severity = triage_metadata.get("severity", "unknown")
-        query_window = triage_metadata.get("query_window", "unknown")
+        resolved_window = query_window or triage_metadata.get("query_window")
+
+        incident_line = f"Incident: {incident_title}"
+        if trace_id and resolved_window:
+            incident_line = f"{incident_line} ({trace_id}, {resolved_window})"
+        elif trace_id:
+            incident_line = f"{incident_line} ({trace_id})"
+        elif resolved_window:
+            incident_line = f"{incident_line} ({resolved_window})"
 
         triage_line = (
-            f"incident_type={incident_type}, "
-            f"severity={severity}, "
-            f"query_window={query_window}"
+            f"{incident_type} [{severity}]"
         )
 
         summary_preview = ObservabilityBotManager._format_response(summary)
         return (
-            f"Incident: {incident_title}\n"
+            f"{incident_line}\n"
             f"Triage: {triage_line}\n\n"
             f"Diagnosis:\n"
             f"{summary_preview}"
