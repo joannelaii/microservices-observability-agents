@@ -9,6 +9,7 @@ class DiagnosticState(TypedDict):
     service_name: str
     trace_id: Optional[str]
     time_window: Optional[str]
+    alert_payload: Optional[dict[str, Any]]
 
     # Triage output: structured incident classification
     triage_metadata: Optional[dict[str, Any]]
@@ -21,7 +22,6 @@ class DiagnosticState(TypedDict):
 
     root_cause_found: bool
     next_action: str
-    triage: str
 
     # Final output
     summary: Optional[str]

@@ -1,4 +1,3 @@
-import run_main_agent
 import re
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
@@ -25,23 +24,35 @@ class ObservabilityBotManager:
         try:
             result = self.graph.invoke({
                 "messages": [HumanMessage(content=text)],
-                "telemetry": telemetry,
+                "telemetry": "",
                 "service_name": service_name,
                 "trace_id": trace_id,
                 "time_window": effective_window if trace_id else None,
+                "alert_payload": None,
                 "triage_metadata": None,
                 "diagnostic_plan": None,
                 "sop_guidance": None,
                 "code_analysis": None,
                 "reasoning_output": None,
-                "root_cause_found": False,
                 "next_action": "",
+                "root_cause_found": False,
                 "summary": None,
                 "error": None,
             })
 
             summary = result.get("summary") or result.get("diagnostic_plan") or "No diagnosis available."
-            return self._format_response(summary)
+            triage_metadata = result.get("triage_metadata") or {}
+
+            if trace_id:
+                incident_title = "Trace Investigation"
+            else:
+                incident_title = triage_metadata.get("incident_type", "Incident").replace("_", " ").title()
+
+            return self._format_diagnosis_response(
+                incident_title=incident_title,
+                triage_metadata=triage_metadata,
+                summary=summary,
+            )
 
         except Exception as e:
             return f" Error: {type(e).__name__}: {str(e)}"
@@ -83,6 +94,21 @@ class ObservabilityBotManager:
         raw = (text or "").strip()
         if not raw:
             return None, None
+
+        # Common prefixed formats:
+        # - trace_id=<id>, 20m
+        # - trace_id: <id>, 20 minutes
+        # - trace id <id> 20m
+        prefixed = re.search(
+            r"(?:trace[_\s-]?id)\s*[:=]?\s*(?P<trace>[A-Za-z0-9-]{8,})\s*(?:[,\s]\s*(?P<window>.*))?$",
+            raw,
+            flags=re.IGNORECASE,
+        )
+        if prefixed:
+            candidate = (prefixed.group("trace") or "").strip()
+            trace_id = cls._detect_trace_id(candidate)
+            if trace_id:
+                return trace_id, cls._parse_time_window((prefixed.group("window") or "").strip())
 
         # Preferred explicit split: trace_id, time window
         if "," in raw:
@@ -136,6 +162,27 @@ class ObservabilityBotManager:
         lines = summary.split("\n")[:10]  # Limit to 10 lines for readability
         return "\n".join(lines) or "No diagnosis available."
 
+    @staticmethod
+    def _format_diagnosis_response(incident_title: str, triage_metadata: dict, summary: str) -> str:
+        """Format structured diagnosis response similar to alert flow output."""
+        incident_type = triage_metadata.get("incident_type", "unknown")
+        severity = triage_metadata.get("severity", "unknown")
+        query_window = triage_metadata.get("query_window", "unknown")
+
+        triage_line = (
+            f"incident_type={incident_type}, "
+            f"severity={severity}, "
+            f"query_window={query_window}"
+        )
+
+        summary_preview = ObservabilityBotManager._format_response(summary)
+        return (
+            f"Incident: {incident_title}\n"
+            f"Triage: {triage_line}\n\n"
+            f"Diagnosis:\n"
+            f"{summary_preview}"
+        )
+
 
 # Global bot instance
 bot_manager = ObservabilityBotManager()
@@ -155,12 +202,22 @@ async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome = (
         "Welcome to Microservices Observability Bot!\n\n"
         "Send me:\n"
-        "• An alarm/alert description (e.g., 'high CPU, pod restarting')\n"
         "• A trace ID (e.g., 'abc123def456')\n"
         "• A trace ID with window (e.g., 'abc123def456, 20 minutes')\n\n"
         "I'll diagnose the issue and suggest fixes."
     )
     await context.bot.send_message(chat_id=update.effective_chat.id, text=welcome)
+
+
+async def on_chatid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Return current chat ID for easy TELEGRAM_CHAT_ID setup."""
+    chat = update.effective_chat
+    details = (
+        f"chat_id={chat.id}\n"
+        f"chat_type={chat.type}\n"
+        f"chat_title={chat.title or 'N/A'}"
+    )
+    await context.bot.send_message(chat_id=chat.id, text=details)
 
 
 def main():
@@ -174,6 +231,7 @@ def main():
     
     # Add handlers
     app.add_handler(CommandHandler("start", on_start))
+    app.add_handler(CommandHandler("chatid", on_chatid))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
     
     print("Bot started (polling)")

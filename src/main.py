@@ -1,15 +1,38 @@
 import json
 import subprocess
+import heapq
 import time
 from datetime import datetime, timezone
+from itertools import count
+import os
+import sys
 
 import requests
+from langchain_core.messages import HumanMessage
+from dotenv import load_dotenv
+
+load_dotenv()
+
+if __package__ in (None, ""):
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+
+from src.graph import build_graph
+from src.nodes import classify_alert_payload
 
 
 PROM_ALERTS_URL = "http://localhost:9090/api/v1/alerts"
 POLL_INTERVAL = 10
 TRIGGER_COOLDOWN = 300
 TIMEOUT = 5
+TELEGRAM_TIMEOUT = 10
+
+SEVERITY_TO_PRIORITY = {
+    "p1": 0,
+    "p2": 1,
+    "p3": 2,
+}
 
 ALERT_GROUP_MAP = {
     "FrontendCheckoutErrorRateHigh": "frontend:symptom",
@@ -78,7 +101,123 @@ def build_incident_payload(key: str, group_alerts: list[dict]) -> dict:
 
 def diagnose(payload: dict) -> None:
     print(f"[TRIGGER] {json.dumps(payload, ensure_ascii=False)}")
-    # TODO add entrypoint for invoking graph
+
+    graph = _get_graph()
+    alert_context = _payload_to_alert_context(payload)
+    service_name = payload.get("scope") or "opentelemetry-collector"
+
+    result = graph.invoke(
+        {
+            "messages": [HumanMessage(content=alert_context)],
+            "telemetry": "",
+            "service_name": service_name,
+            "trace_id": None,
+            "time_window": None,
+            "alert_payload": payload,
+            "triage_metadata": None,
+            "diagnostic_plan": None,
+            "sop_guidance": None,
+            "code_analysis": None,
+            "reasoning_output": None,
+            "next_action": "",
+            "summary": None,
+            "error": None,
+        }
+    )
+
+    triage_metadata = result.get("triage_metadata") or {}
+    summary = result.get("summary") or result.get("diagnostic_plan") or "No diagnosis available."
+
+    message = _build_telegram_diagnosis_message(payload, triage_metadata, summary)
+    _send_to_telegram(message)
+
+
+_GRAPH = None
+
+
+def _get_graph():
+    global _GRAPH
+    if _GRAPH is None:
+        _GRAPH = build_graph()
+    return _GRAPH
+
+
+def _payload_to_alert_context(payload: dict) -> str:
+    alert_names = ", ".join(payload.get("alert_names", [])) or "unknown"
+    incident_key_value = payload.get("incident_key") or "unknown"
+    scope = payload.get("scope") or "unknown"
+    severity = payload.get("severity") or "unknown"
+
+    details: list[str] = []
+    for alert in payload.get("alerts", []):
+        labels = alert.get("labels", {}) or {}
+        annotations = alert.get("annotations", {}) or {}
+        details.append(
+            " | ".join(
+                [
+                    f"alertname={alert.get('alertname')}",
+                    f"class={labels.get('class')}",
+                    f"label_severity={labels.get('severity')}",
+                    f"summary={annotations.get('summary')}",
+                    f"description={annotations.get('description')}",
+                    f"value={alert.get('value')}",
+                ]
+            )
+        )
+
+    details_text = "\n".join(details) if details else "details=none"
+    return (
+        f"incident_key={incident_key_value}\n"
+        f"scope={scope}\n"
+        f"severity={severity}\n"
+        f"alert_names={alert_names}\n"
+        f"start_time={payload.get('start_time')}\n"
+        f"end_time={payload.get('end_time')}\n"
+        f"{details_text}"
+    )
+
+
+def _build_telegram_diagnosis_message(payload: dict, triage_metadata: dict, summary: str) -> str:
+    incident_key_value = payload.get("alert_names") or "unknown"
+    triage_severity = triage_metadata.get("severity", "unknown")
+    incident_type = triage_metadata.get("incident_type", "unknown")
+
+    return (
+        f"Incident: {incident_key_value}\n"
+        f"Triage: {incident_type} [{triage_severity}]\n\n"
+        f"Diagnosis:\n{summary}"
+    )
+
+
+def _send_to_telegram(text: str) -> None:
+    token = os.getenv("TELEGRAM_TOKEN")
+    chat_ids = os.getenv("TELEGRAM_CHAT_ID", "")
+
+    missing = []
+    if not token:
+        missing.append("TELEGRAM_TOKEN")
+    if not chat_ids:
+        missing.append("TELEGRAM_CHAT_ID")
+
+    if missing:
+        print(f"[WARN] Missing {', '.join(missing)}; skipping telegram send.")
+        return
+
+    endpoint = f"https://api.telegram.org/bot{token}/sendMessage"
+    for chat_id in [cid.strip() for cid in chat_ids.split(",") if cid.strip()]:
+        try:
+            requests.post(
+                endpoint,
+                json={"chat_id": chat_id, "text": text[:4000]},
+                timeout=TELEGRAM_TIMEOUT,
+            ).raise_for_status()
+        except Exception as exc:
+            print(f"[ERROR] Failed to send diagnosis to chat_id={chat_id}: {exc}")
+
+
+def _queue_priority_from_payload(payload: dict) -> int:
+    cls = classify_alert_payload(payload)
+    return SEVERITY_TO_PRIORITY.get(cls.get("severity", "p3"), SEVERITY_TO_PRIORITY["p3"])
 
 
 
@@ -92,6 +231,8 @@ def fetch_alerts() -> list[dict]:
 def main() -> None:
     triggered_timestamp: dict[str, float] = {}
     firing: set[str] = set()
+    alert_queue: list[tuple[int, float, int, str, dict]] = []
+    queue_counter = count()
 
     try:
         while True:
@@ -118,8 +259,20 @@ def main() -> None:
 
                 if key not in firing or cooldown_expired:
                     payload = build_incident_payload(key, group_alerts)
-                    diagnose(payload)
+                    priority = _queue_priority_from_payload(payload)
+                    heapq.heappush(
+                        alert_queue,
+                        (priority, now, next(queue_counter), key, payload),
+                    )
                     triggered_timestamp[key] = now
+
+            while alert_queue:
+                _, _, _, queue_key, queue_payload = heapq.heappop(alert_queue)
+                print(f"[QUEUE] Processing {queue_key}")
+                try:
+                    diagnose(queue_payload)
+                except Exception as exc:
+                    print(f"[ERROR] diagnosis failed for {queue_key}: {exc}")
 
             resolved_keys = firing - is_fired
             for key in resolved_keys:

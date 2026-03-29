@@ -61,10 +61,8 @@ def build_graph():
     graph.add_edge(TELEMETRY_TOOL, REASONING_NODE)
     # Conditional routing from reasoning (code expert, telemetry, or diagnosis)
     graph.add_conditional_edges(REASONING_NODE, route_next)
-    # TODO: Check if telemetry_tool can be called with this conditional edge
 
     # loop nodes
-    graph.add_edge(TELEMETRY_TOOL, REASONING_NODE)
     graph.add_edge(CODING_NODE, REASONING_NODE)
 
     # ending nodes
