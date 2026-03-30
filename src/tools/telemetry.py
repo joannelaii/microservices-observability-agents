@@ -11,6 +11,7 @@ import requests
 from dotenv import load_dotenv
 from langchain_core.tools import tool
 
+from dotenv import load_dotenv
 load_dotenv()
 
 
@@ -252,22 +253,104 @@ class TelemetryService:
     ) -> dict:
         if trace_id:
             try:
-                return {"trace": self.tempo.get_trace(trace_id)}
+                return {"traces": [self.tempo.get_trace(trace_id)]}
             except Exception as e:
                 return {"error": str(e)}
-
-        tags = {}
-        if service:
-            tags["service.name"] = service
 
         try:
             matches = self.tempo.search(
                 start_time=start_s,
                 end_time=end_s,
-                tags=tags or None,
-                limit=self.max_traces if service else 10,
+                limit=max(self.max_traces, 50),
             )
-            return {"matches": matches}
+
+            selected: List[Dict[str, Any]] = []
+
+            for match in matches:
+                current_trace_id = match.get("traceID")
+                if not current_trace_id:
+                    continue
+
+                try:
+                    trace = self.tempo.get_trace(current_trace_id)
+                except Exception:
+                    continue
+
+                trace_services = set()
+                has_problem = False
+
+                for batch in trace.get("batches", []):
+                    resource_service = None
+                    for attr in batch.get("resource", {}).get("attributes", []):
+                        if attr.get("key") == "service.name":
+                            value = attr.get("value", {})
+                            if "stringValue" in value:
+                                resource_service = value["stringValue"]
+                            elif "intValue" in value:
+                                resource_service = str(value["intValue"])
+                            elif "boolValue" in value:
+                                resource_service = str(value["boolValue"]).lower()
+                            break
+
+                    if resource_service:
+                        trace_services.add(resource_service)
+
+                    for scope_spans in batch.get("scopeSpans", []):
+                        for span in scope_spans.get("spans", []):
+                            status = span.get("status", {})
+                            if status.get("code") == "STATUS_CODE_ERROR":
+                                has_problem = True
+
+                            for event in span.get("events", []):
+                                if event.get("name") == "exception":
+                                    has_problem = True
+                                    break
+
+                            for attr in span.get("attributes", []):
+                                key = attr.get("key")
+                                value = attr.get("value", {})
+
+                                if "stringValue" in value:
+                                    attr_value = value["stringValue"]
+                                elif "intValue" in value:
+                                    attr_value = str(value["intValue"])
+                                elif "boolValue" in value:
+                                    attr_value = str(value["boolValue"]).lower()
+                                else:
+                                    continue
+
+                                if key == "error" and attr_value == "true":
+                                    has_problem = True
+
+                                elif key in {"rpc.grpc.status_code", "grpc.status_code"} and attr_value != "0":
+                                    has_problem = True
+
+                                elif key in {"http.status_code", "http.response.status_code"}:
+                                    try:
+                                        if int(attr_value) >= 400:
+                                            has_problem = True
+                                    except Exception:
+                                        pass
+
+                                elif key in {"net.peer.name", "server.address"} and attr_value:
+                                    trace_services.add(attr_value)
+
+                if service and service not in trace_services:
+                    continue
+
+                if has_problem:
+                    selected.append({
+                        "trace": trace,
+                        "durationMs": match.get("durationMs", -1),
+                    })
+
+            selected.sort(
+                key=lambda x: int(x["durationMs"]) if x["durationMs"] is not None else -1,
+                reverse=True,
+            )
+
+            return {"traces": [item["trace"] for item in selected[:1]]}
+
         except Exception as e:
             return {"error": str(e)}
     
@@ -306,7 +389,6 @@ telemetry_service = TelemetryService(
     namespace=cfg.namespace,
     max_log_lines=cfg.max_log_lines,
     max_traces=cfg.max_traces,
-    step=cfg.step,
     rollup_window=cfg.default_rollup_window,
 )
 
@@ -319,7 +401,49 @@ def get_relevant_telemetry(
     trace_id: Optional[str] = None,
     include: Optional[list[str]] = None,
 ) -> Dict[str, Any]:
-    """Get relevant telemetry data for a service or trace ID."""
+    """
+    Retrieve telemetry data (metrics, logs, traces) from the observability stack
+    for diagnosing system issues within a specified time window.
+
+    It can be used for:
+    - Incident-level diagnosis (no trace_id, optional service filter)
+    - Request-level debugging (with trace_id)
+
+    Args:
+        start_time (str):
+            Start of the time range (ISO 8601 format, e.g. "2026-03-30T10:00:00Z").
+
+        end_time (str):
+            End of the time range (ISO 8601 format).
+
+        service (str, optional):
+            Service name to filter telemetry (e.g. "payment", "frontend").
+            If None, queries across all services.
+
+        trace_id (str, optional):
+            Specific trace ID to retrieve detailed trace and related logs.
+            If provided:
+                - Metrics will NOT be returned
+                - Logs and traces will be filtered to this trace
+
+        include (list[str], optional):
+            Types of telemetry to include. Options:
+                ["metrics", "logs", "traces"]
+            Defaults to all if not provided.
+
+    Returns:
+        Dict[str, Any]:
+            Dictionary containing requested telemetry data:
+            {
+                "metrics": {...},
+                "logs": {...},
+                "traces": {...}
+            }
+
+    Notes:
+        - Use broader time ranges for incident investigation.
+        - Use narrower time ranges for precise debugging.
+    """
     return telemetry_service.collect(
         start_time=start_time,
         end_time=end_time,
@@ -327,3 +451,13 @@ def get_relevant_telemetry(
         trace_id=trace_id,
         include=include,
     )
+
+# TEST
+# if __name__ == "__main__":
+#     output = get_relevant_telemetry.invoke({
+#         "start_time": "2026-03-31T00:45:00Z",
+#         "end_time": "2026-03-31T00:48:00Z",
+#         "service": "checkout",
+#         "include": ["traces"],
+#     })
+#     print(output)
