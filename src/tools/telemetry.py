@@ -8,7 +8,10 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
 import requests
+from dotenv import load_dotenv
 from langchain_core.tools import tool
+
+load_dotenv()
 
 
 def to_unix_seconds(value):
