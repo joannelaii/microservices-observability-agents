@@ -6,3 +6,4 @@ __pycache__/
 .faiss_index/
 .vscode/
 scripts/
+test_triage_flow.py
