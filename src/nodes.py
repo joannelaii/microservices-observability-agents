@@ -285,6 +285,10 @@ def run_summariser_node(state: DiagnosticState) -> DiagnosticState:
 
 
 # TODO: implement this function
+def run_diagnosis_node(state: DiagnosticState) -> DiagnosticState:
+    return {**state, "diagnosis": "STUB: diagnosis_node not yet implemented"}
+
+
+# TODO: implement this function
 def run_best_effort_node(state: DiagnosticState) -> DiagnosticState:
     return {**state, "best_effort": "STUB: best_effort_node not yet implemented"}
-

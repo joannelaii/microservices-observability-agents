@@ -6,6 +6,7 @@ from src.tools.telemetry import get_relevant_telemetry
 from .state import DiagnosticState
 from .nodes import (
     run_best_effort_node,
+    run_diagnosis_node,
     run_main_agent_node,
     run_code_expert_node,
     run_reasoning_node,
@@ -27,7 +28,7 @@ BEST_EFFORT = "synthesize_best_effort"
 def route_next(state: DiagnosticState) -> str:
     action = state["next_action"]
 
-    if action in [CODING_NODE, TELEMETRY_TOOL, DIAGNOSIS, BEST_EFFORT]:
+    if action in [CODING_NODE, SOP_TOOL, TELEMETRY_TOOL, DIAGNOSIS, BEST_EFFORT]:
         return action
 
     raise ValueError("action not found")
@@ -42,13 +43,12 @@ def build_graph():
 
     # Add nodes
     graph.add_node(MAIN_NODE, run_main_agent_node)
-    # TODO: write triage_node function
     graph.add_node(TRIAGE_NODE, triage_node)
     graph.add_node(REASONING_NODE, run_reasoning_node)
     graph.add_node(CODING_NODE, run_code_expert_node)
-    graph.add_node(DIAGNOSIS, run_summariser_node)
-    # TODO: write best_effort function
+    graph.add_node(DIAGNOSIS, run_diagnosis_node)
     graph.add_node(BEST_EFFORT, run_best_effort_node)
+    graph.add_node(SUMMARIZER_NODE, run_summariser_node)
 
     # Adjust flow accordingly
     graph.add_edge(START, MAIN_NODE)
@@ -66,7 +66,9 @@ def build_graph():
     graph.add_edge(CODING_NODE, REASONING_NODE)
 
     # ending nodes
-    graph.add_edge(DIAGNOSIS, END)
-    graph.add_edge(BEST_EFFORT, END)
+    graph.add_edge(DIAGNOSIS, SUMMARIZER_NODE)
+    graph.add_edge(BEST_EFFORT, SUMMARIZER_NODE)
+
+    graph.add_edge(SUMMARIZER_NODE, END)
 
     return graph.compile()
