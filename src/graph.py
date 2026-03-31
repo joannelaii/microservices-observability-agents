@@ -14,6 +14,7 @@ from .nodes import (
 )
 
 MAIN_NODE = "main_node"
+SUMMARIZER_NODE = "summarizer_node"
 TRIAGE_NODE = "triage_node"
 REASONING_NODE = "reasoning_node"
 CODING_NODE = "coding_node"
@@ -53,13 +54,15 @@ def build_graph():
     graph.add_edge(START, MAIN_NODE)
     # TODO: add triage edge between MAIN_NODE and SOP_TOOL
     graph.add_edge(MAIN_NODE, TRIAGE_NODE)
+    # Triage always routes to SOP_TOOL (rule-based severity classification handled by triage_node)
     graph.add_edge(TRIAGE_NODE, SOP_TOOL)
+    # Both SOP and telemetry feed into reasoning
     graph.add_edge(SOP_TOOL, REASONING_NODE)
+    graph.add_edge(TELEMETRY_TOOL, REASONING_NODE)
+    # Conditional routing from reasoning (code expert, telemetry, or diagnosis)
     graph.add_conditional_edges(REASONING_NODE, route_next)
-    # TODO: Check if telemetry_tool can be called with this conditional edge
 
     # loop nodes
-    graph.add_edge(TELEMETRY_TOOL, REASONING_NODE)
     graph.add_edge(CODING_NODE, REASONING_NODE)
 
     # ending nodes

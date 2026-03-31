@@ -5,3 +5,5 @@ __pycache__/
 .env
 .faiss_index/
 .vscode/
+scripts/
+test_triage_flow.py
