@@ -10,12 +10,13 @@ state = {
 
     k8s.deployment.name=checkout
 
-    alert=ServiceUnreachable
-    alert.message=checkout service is not responding to requests.
+    metric.http_errors_total=634
+    alert=DependencyUnreachable
+    alert.message=checkout service is failing to reach downstream dependencies.
     """,
     "service_name": "checkout",
-    "sop_guidance": "If a service is unreachable, first verify whether its pods are running and ready.",
-    "coding_task": "Check whether the checkout pods are running and ready in the otel-demo namespace. Report the pod name, status, and ready state.",
+    "sop_guidance": "If a service cannot reach its dependencies, verify DNS resolution and HTTP connectivity to each downstream service from within the affected pod.",
+    "coding_task": "From within the checkout pod, first retrieve its environment variables to discover downstream dependency addresses, then check network connectivity to each. Report whether each dependency is reachable.",
     "diagnostic_plan": None,
     "reasoning_output": None,
     "code_analysis": None,

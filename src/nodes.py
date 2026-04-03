@@ -1,3 +1,8 @@
+import io
+import re
+import traceback
+from contextlib import redirect_stdout
+
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from src.backend import llm_and_embeddings
@@ -64,6 +69,55 @@ def triage_node(state: DiagnosticState) -> DiagnosticState:
 #     return {**state, "sop_guidance": result.get("answer", "")}
 
 
+# Code Expert Helpers
+def _extract_code_block(text: str) -> tuple[str, str] | None:
+    """Return (language, code) for the first fenced code block found.
+
+    Recognises python, bash, sh, shell, and plain (no language tag) blocks.
+    Returns None if no fenced block is present.
+    """
+    match = re.search(r'```(python|bash|sh|shell|)\n(.*?)```', text, re.DOTALL | re.IGNORECASE)
+    if match:
+        lang = match.group(1).lower() or "shell"
+        code = match.group(2).strip()
+        return lang, code
+    return None
+
+
+def _execute_code(lang: str, code: str) -> str:
+    """Execute code and return captured stdout + stderr.
+
+    - python  → exec() with full stdlib available
+    - bash / sh / shell → subprocess with shell=True
+    """
+    import subprocess
+
+    if lang == "python":
+        captured = io.StringIO()
+        try:
+            with redirect_stdout(captured):
+                exec(code, {"__builtins__": __builtins__})  # noqa: S102
+            output = captured.getvalue().strip()
+            return output if output else "Code executed successfully but produced no output."
+        except Exception as e:
+            return f"Execution error ({type(e).__name__}): {e}\n{traceback.format_exc()}"
+    else:
+        try:
+            result = subprocess.run(
+                code,
+                shell=True,  # noqa: S602
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            output = (result.stdout + result.stderr).strip()
+            return output if output else "Command produced no output."
+        except subprocess.TimeoutExpired:
+            return "Execution error: command timed out after 30 seconds."
+        except Exception as e:
+            return f"Execution error ({type(e).__name__}): {e}"
+
+
 # Code Expert Node
 def run_code_expert_node(state: DiagnosticState) -> DiagnosticState:
     coding_task = state.get("coding_task") or "Analyse the available telemetry and write a focused diagnostic script."
@@ -82,14 +136,23 @@ def run_code_expert_node(state: DiagnosticState) -> DiagnosticState:
             ## Task from Reasoning Agent
             {coding_task}
 
-            Write the Python code (e.g. function/script) required to accomplish this task.
+            Write and execute the script required to accomplish this task.
             """
         ),
     ]
     response = llm.invoke(messages)
     print("==========Code Expert==========")
-    print(f"\nCode Expert response:\n{response.content}")
-    return {**state, "code_analysis": response.content}
+    print(f"\nCode Expert generated:\n{response.content}")
+
+    extracted = _extract_code_block(response.content)
+    if not extracted:
+        result = f"No executable code block found in response. Raw output:\n{response.content}"
+    else:
+        lang, code = extracted
+        result = _execute_code(lang, code)
+
+    print(f"\nCode Expert execution result:\n{result}")
+    return {**state, "code_analysis": result}
 
 
 # Reasoning Node
