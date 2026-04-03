@@ -203,10 +203,31 @@ bot_manager = ObservabilityBotManager()
 
 async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle incoming Telegram messages."""
+    if not update.message or not update.message.text:
+        return
+
     user_text = update.message.text
     chat_id = update.effective_chat.id
 
     response = bot_manager.process_input(user_text)
+    await context.bot.send_message(chat_id=chat_id, text=response)
+
+
+async def on_diag(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /diag command for group-safe diagnosis input."""
+    if not update.message:
+        return
+
+    chat_id = update.effective_chat.id
+    text = " ".join(context.args).strip() if context.args else ""
+    if not text:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="Usage: /diag <trace_id>[, <window>]\nExample: /diag abc123def456, 20m",
+        )
+        return
+
+    response = bot_manager.process_input(text)
     await context.bot.send_message(chat_id=chat_id, text=response)
 
 
@@ -216,7 +237,8 @@ async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Welcome to Microservices Observability Bot!\n\n"
         "Send me:\n"
         "• A trace ID (e.g., 'abc123def456')\n"
-        "• A trace ID with window (e.g., 'abc123def456, 20 minutes')\n\n"
+        "• A trace ID with window (e.g., 'abc123def456, 20 minutes')\n"
+        "• In groups: /diag <trace_id>[, <window>]\n\n"
         "I'll diagnose the issue and suggest fixes."
     )
     await context.bot.send_message(chat_id=update.effective_chat.id, text=welcome)
@@ -245,6 +267,7 @@ def main():
     # Add handlers
     app.add_handler(CommandHandler("start", on_start))
     app.add_handler(CommandHandler("chatid", on_chatid))
+    app.add_handler(CommandHandler("diag", on_diag))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
     
     print("Bot started (polling)")

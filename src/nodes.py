@@ -253,6 +253,7 @@ def run_reasoning_node(state: DiagnosticState) -> DiagnosticState:
         **state,
         "reasoning_output": "STUB: Reasoning agent not yet implemented",
         "root_cause_found": True,
+        # hardcoded next action for testing summariser node, but need to change accordingly
         "next_action": "synthesize_diagnosis",
     }
 
@@ -262,21 +263,6 @@ def run_reasoning_node(state: DiagnosticState) -> DiagnosticState:
 def run_summariser_node(state: DiagnosticState) -> DiagnosticState:
     messages = [
         SystemMessage(content=SUMMARISER_SYSTEM_PROMPT),
-        HumanMessage(
-            content=f"""
-        Telemetry: {state["telemetry"]}\n
-        Service: {state["service_name"]}\n
-
-        SOP Agent:\n
-        {state.get("sop_guidance", "N/A")}\n
-
-        Code Expert:\n
-        {state.get("code_analysis", "N/A")}\n
-
-        Reasoning Agent:\n
-        {state.get("reasoning_output", "N/A")}\n
-            """
-        ),
     ]
     response = llm.invoke(messages)
     print("==========Summariser Agent==========")
