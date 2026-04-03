@@ -36,9 +36,12 @@ Be concise but specific. Reference metric thresholds and values when available (
 
 SUMMARISER_SYSTEM_PROMPT = """
 You are the final summariser for a microservices diagnostic system.
-Produce a structured incident report for an on-call engineer.
+Produce a structured incident report for an on-call engineer based on the output from the diagnosis node.
 
-Your report MUST include:
+ONLY produce a report if the diagnosis node returns a diagnosis. If no root cause is found, return a message indicating insufficient data for diagnosis.
+In the case of insufficient data, DO NOT attempt to fill in gaps with assumptions or generic advice. Just state that the diagnosis is inconclusive based on the available data.
+
+If there is sufficient data, your report MUST include:
 
 1) INCIDENT SUMMARY
    - What happened, which service, when
@@ -54,8 +57,8 @@ Your report MUST include:
 4) PREVENTION
    - Long term architectural or monitoring improvements
 
-Base your report ONLY on actual evidence gathered. 
-Be specific — reference actual metric values, pod names, and namespaces.
+Base your report ONLY on what is returned by the diagnosis node.
+Be specific as specific as you can be.
 Do NOT make generic recommendations not supported by the evidence.
 Keep the report human-readable and concise (aim for 3-5 sentences per section).
 """
