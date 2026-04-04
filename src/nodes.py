@@ -330,13 +330,14 @@ def run_reasoning_node(state: DiagnosticState) -> DiagnosticState:
         for tc in tool_calls:
             name = tc["name"]
             args = tc.get("args", {})
-            print(f"  [Reasoning] → {name}({list(args.keys())})")
+            print(f"  [Reasoning] → {name}({args})")
             try:
                 result = tool_map[name].invoke(args)
                 tool_result = json.dumps(result, default=str)
             except Exception as exc:
                 tool_result = json.dumps({"error": str(exc)})
  
+            # print(f"  [Reasoning] ← {tool_result}")
             messages.append(
                 ToolMessage(content=tool_result, tool_call_id=tc["id"])
             )
@@ -365,7 +366,7 @@ def run_reasoning_node(state: DiagnosticState) -> DiagnosticState:
  
     # TODO: edit if there is a new summariser node, if not then remove the next action for root cause found together with dianosis node
     if root_cause_found:
-        next_action = "synthesize_diagnosis"
+        next_action = "summarizer_node"
     else:
         next_action = "synthesize_best_effort"
  
