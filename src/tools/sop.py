@@ -10,7 +10,7 @@ from langchain_community.document_loaders import DirectoryLoader, TextLoader
 from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from src.backend import llm_and_embeddings
+from backend import llm_and_embeddings
 
 load_dotenv()
 
