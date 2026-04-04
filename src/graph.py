@@ -68,7 +68,6 @@ def build_graph():
     # ending nodes
     graph.add_edge(DIAGNOSIS, SUMMARIZER_NODE)
     graph.add_edge(BEST_EFFORT, SUMMARIZER_NODE)
-
     graph.add_edge(SUMMARIZER_NODE, END)
 
     return graph.compile()

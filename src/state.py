@@ -17,6 +17,7 @@ class DiagnosticState(TypedDict):
     # Diagnostic pipeline outputs
     diagnostic_plan: Optional[str]
     sop_guidance: Optional[str]
+    sop_content: Optional[str]
     code_analysis: Optional[str]
     reasoning_output: Optional[str]
 
@@ -24,6 +25,7 @@ class DiagnosticState(TypedDict):
     next_action: str
 
     # Final output
+    best_effort: Optional[str]
     summary: Optional[str]
     error: Optional[str]
 
