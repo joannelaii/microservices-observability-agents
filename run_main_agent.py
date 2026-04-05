@@ -9,6 +9,7 @@ def run_main_agent(alert: str, service_name: str):
     return graph.invoke({
         "telemetry": alert,
         "service_name": service_name,
+        "start_time": None,
         "sop_guidance": None,
         "code_analysis": None,
         "reasoning_output": None,

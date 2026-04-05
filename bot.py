@@ -25,6 +25,7 @@ class ObservabilityBotManager:
                 "messages": [HumanMessage(content=text)],
                 "telemetry": "",
                 "service_name": service_name,
+                "start_time": None,
                 "trace_id": trace_id,
                 "time_window": effective_window if trace_id else None,
                 "alert_payload": None,

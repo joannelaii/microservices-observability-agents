@@ -111,6 +111,7 @@ def diagnose(payload: dict) -> None:
             "messages": [HumanMessage(content=alert_context)],
             "telemetry": "",
             "service_name": service_name,
+            "start_time": payload.get("start_time"),
             "trace_id": None,
             "time_window": None,
             "alert_payload": payload,
