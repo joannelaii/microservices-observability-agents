@@ -1,5 +1,5 @@
 from dotenv import load_dotenv
-from src.nodes import run_code_expert_node
+from src.nodes import run_code_execution_node, run_code_generation_node
 
 load_dotenv()
 
@@ -18,6 +18,8 @@ state = {
     "coding_task": "Check whether the checkout pods are running and ready in the otel-demo namespace. Report the pod name, status, and ready state.",
     "diagnostic_plan": None,
     "reasoning_output": None,
+    "generated_code": None,
+    "code_execution_history": None,
     "code_analysis": None,
     "root_cause_found": False,
     "next_action": "coding_node",
@@ -26,5 +28,14 @@ state = {
 }
 
 if __name__ == "__main__":
-    print("===Running Code Agent Node===\n")
-    result = run_code_expert_node(state)
+    print("===Running Coding Sub-loop===\n")
+
+    # Step 1: Code Generation produces first script
+    state = run_code_generation_node(state)
+
+    # Loop: execute → generate → execute → ... until insight returned
+    while state.get("next_action") == "code_execution_node":
+        state = run_code_execution_node(state)
+        state = run_code_generation_node(state)
+
+    print(f"\n===Final code_analysis returned to Reasoning Agent===\n{state.get('code_analysis')}")

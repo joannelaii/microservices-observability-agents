@@ -1,14 +1,10 @@
-import io
 import re
-import traceback
-from contextlib import redirect_stdout
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from src.backend import llm_and_embeddings
-from .prompts import CODING_AGENT_SYSTEM_PROMPT, MAIN_AGENT_SYSTEM_PROMPT, REASONING_AGENT_SYSTEM_PROMPT, SUMMARISER_SYSTEM_PROMPT
+from .prompts import CODE_GENERATION_AGENT_SYSTEM_PROMPT, MAIN_AGENT_SYSTEM_PROMPT, REASONING_AGENT_SYSTEM_PROMPT, SUMMARISER_SYSTEM_PROMPT
 from .state import DiagnosticState
-import os
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -87,43 +83,64 @@ def _extract_code_block(text: str) -> tuple[str, str] | None:
 def _execute_code(lang: str, code: str) -> str:
     """Execute code and return captured stdout + stderr.
 
-    - python  → exec() with full stdlib available
-    - bash / sh / shell → subprocess with shell=True
+    Both python and shell scripts are run as subprocesses so that a timeout
+    applies uniformly — blocking kubectl calls inside generated scripts cannot
+    hang the agent forever.
     """
     import subprocess
+    import sys as _sys
 
-    if lang == "python":
-        captured = io.StringIO()
-        try:
-            with redirect_stdout(captured):
-                exec(code, {"__builtins__": __builtins__})  # noqa: S102
-            output = captured.getvalue().strip()
-            return output if output else "Code executed successfully but produced no output."
-        except Exception as e:
-            return f"Execution error ({type(e).__name__}): {e}\n{traceback.format_exc()}"
-    else:
-        try:
+    timeout = 60  # seconds — generous for multi-step kubectl scripts
+
+    try:
+        if lang == "python":
+            result = subprocess.run(
+                [_sys.executable, "-c", code],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        else:
             result = subprocess.run(
                 code,
                 shell=True,  # noqa: S602
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=timeout,
             )
-            output = (result.stdout + result.stderr).strip()
-            return output if output else "Command produced no output."
-        except subprocess.TimeoutExpired:
-            return "Execution error: command timed out after 30 seconds."
-        except Exception as e:
-            return f"Execution error ({type(e).__name__}): {e}"
+        output = (result.stdout + result.stderr).strip()
+        return output if output else "Code executed successfully but produced no output."
+    except subprocess.TimeoutExpired:
+        return f"Execution error: script timed out after {timeout} seconds."
+    except Exception as e:
+        return f"Execution error ({type(e).__name__}): {e}"
 
 
-# Code Expert Node
-def run_code_expert_node(state: DiagnosticState) -> DiagnosticState:
-    coding_task = state.get("coding_task") or "Analyse the available telemetry and write a focused diagnostic script."
+# Code Generation Node
+def run_code_generation_node(state: DiagnosticState) -> DiagnosticState:
+    coding_task = state.get("coding_task") or "Analyse the available telemetry and investigate the incident."
+
+    MAX_ITERATIONS = 5
+
+    # Reset history at the start of a new coding session (when Reasoning Agent just routed here)
+    history: list = [] if state.get("next_action") == "coding_node" else list(state.get("code_execution_history") or [])
+
+    # Guard: if we've hit the iteration limit, return best-effort insight from history
+    if len(history) >= MAX_ITERATIONS:
+        summary = f"Reached maximum of {MAX_ITERATIONS} execution steps without a conclusive result. Last result: {history[-1]['result']}"
+        print(f"\nCode Generation Agent: max iterations reached, returning best-effort insight.")
+        return {**state, "code_analysis": summary, "code_execution_history": [], "next_action": "reasoning_node"}
+
+    history_section = ""
+    if history:
+        history_section = "\n## Previous Execution Results\n"
+        for i, entry in enumerate(history, 1):
+            history_section += f"\n### Step {i}\nCode:\n```{entry['lang']}\n{entry['code']}\n```\nResult:\n{entry['result']}\n"
+
+    prompt = "Generate the next script to execute." if history else "Generate the first script to execute."
 
     messages = [
-        SystemMessage(content=CODING_AGENT_SYSTEM_PROMPT),
+        SystemMessage(content=CODE_GENERATION_AGENT_SYSTEM_PROMPT),
         HumanMessage(
             content=f"""
             ## Incident Context
@@ -135,24 +152,51 @@ def run_code_expert_node(state: DiagnosticState) -> DiagnosticState:
 
             ## Task from Reasoning Agent
             {coding_task}
-
-            Write and execute the script required to accomplish this task.
+            {history_section}
+            {prompt}
             """
         ),
     ]
     response = llm.invoke(messages)
-    print("==========Code Expert==========")
-    print(f"\nCode Expert generated:\n{response.content}")
+    content = response.content.strip()
 
-    extracted = _extract_code_block(response.content)
+    print("==========Code Generation Agent==========")
+    print(f"\nCode Generation Agent response:\n{content}")
+
+    # A code block takes priority — if one is present, always execute it even if INSIGHT also appears
+    extracted = _extract_code_block(content)
+    if extracted:
+        return {**state, "generated_code": content, "code_execution_history": history, "next_action": "code_execution_node"}
+
+    if "INSIGHT:" in content:
+        insight = content.split("INSIGHT:", 1)[1].strip()
+        print(f"\nCode Generation Agent insight: {insight}")
+        return {**state, "code_analysis": insight, "code_execution_history": [], "next_action": "reasoning_node"}
+
+    fallback = f"Code generation produced no executable code or insight. Raw output:\n{content}"
+    return {**state, "code_analysis": fallback, "code_execution_history": [], "next_action": "reasoning_node"}
+
+
+# Code Execution Node
+def run_code_execution_node(state: DiagnosticState) -> DiagnosticState:
+    generated = state.get("generated_code") or ""
+    extracted = _extract_code_block(generated)
+
     if not extracted:
-        result = f"No executable code block found in response. Raw output:\n{response.content}"
+        result = f"No executable code block found in generated code. Raw:\n{generated}"
+        lang, code = "unknown", ""
     else:
         lang, code = extracted
         result = _execute_code(lang, code)
 
-    print(f"\nCode Expert execution result:\n{result}")
-    return {**state, "code_analysis": result}
+    print("==========Code Execution Agent==========")
+    print(f"\nExecuting {lang} code:\n{code}")
+    print(f"\nExecution result:\n{result}")
+
+    history = list(state.get("code_execution_history") or [])
+    history.append({"lang": lang, "code": code, "result": result})
+
+    return {**state, "code_execution_history": history, "next_action": "code_generation_node"}
 
 
 # Reasoning Node
