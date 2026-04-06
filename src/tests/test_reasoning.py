@@ -1,22 +1,14 @@
-from src.nodes.nodes import run_reasoning_node
+from pathlib import Path
+from src.nodes import run_reasoning_node
+
+sop_path = Path("src/sops/trace_telemetry.md")
+
+sop_text = sop_path.read_text(encoding="utf-8")
 
 initial_state = {
-    "telemetry": "High error rate observed at 2026-03-29T14:00:00Z, window 13:55Z to 14:05Z",
-    "service_name": "PaymentService",
-    "sop_content": """
-## TRIGGERS
-- Error rate > 5% sustained for 5 minutes
-- Latency p95 > 2000ms
-
-## CHECKS
-- Check error rate for payment-service in Prometheus
-- Check for timeout or exception logs in Loki
-- Check recent pod restarts
-
-## MITIGATION
-- Scale up payment-service replicas
-- Check downstream database connectivity
-    """,
+    "telemetry": "High error rate observed at 2026-04-04T23:29:30.669Z",
+    "service_name": "checkout",
+    "sop_content": sop_text,
     "sop_guidance": None,
     "diagnostic_plan": None,
     "code_analysis": None,
