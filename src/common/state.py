@@ -29,4 +29,5 @@ class DiagnosticState(TypedDict):
     best_effort: Optional[str]
     summary: Optional[str]
     error: Optional[str]
+    diagnosis: Optional[dict[str, Any]]
 

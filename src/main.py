@@ -18,8 +18,8 @@ if __package__ in (None, ""):
     if repo_root not in sys.path:
         sys.path.insert(0, repo_root)
 
-from src.graph import build_graph
-from src.nodes import classify_alert_payload
+from graphs.root_graph import build_graph
+from common.util import classify_alert_payload
 
 
 PROM_ALERTS_URL = "http://localhost:9090/api/v1/alerts"
