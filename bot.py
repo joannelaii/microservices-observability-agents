@@ -2,7 +2,7 @@ import re
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from langchain_core.messages import HumanMessage
-from src.graph import build_graph
+from src.graphs.root_graph import build_graph
 import os
 
 

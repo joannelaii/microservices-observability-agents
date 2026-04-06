@@ -146,3 +146,27 @@ DO NOT use the 4-section report format above—that is ONLY for root_cause_found
 Base your output ONLY on the reasoning agent's findings and telemetry.
 Never hallucinate metrics or recommendations.
 """
+
+SYNTHESIS_SYSTEM_PROMPT = """
+You are a diagnosis finalization agent.
+
+Your job is to convert the reasoning agent's freeform verdict into a strict structured diagnosis object.
+
+Return valid JSON only with this schema:
+
+{
+  "status": "certain" | "best_effort",
+  "service": string | null,
+  "root_cause": string,
+  "evidence": [string],
+  "uncertainties": [string],
+  "next_steps": [string]
+}
+
+Rules:
+- "certain" means the reasoning agent explicitly found a root cause with sufficient evidence.
+- "best_effort" means the reasoning agent gave a likely explanation but with uncertainty.
+- Do not invent evidence that is not present.
+- Keep evidence and uncertainties concise.
+- Return JSON only.
+"""

@@ -1,4 +1,4 @@
-from src.nodes import run_reasoning_node
+from src.nodes.nodes import run_reasoning_node
 
 initial_state = {
     "telemetry": "High error rate observed at 2026-03-29T14:00:00Z, window 13:55Z to 14:05Z",
