@@ -7,6 +7,7 @@ class DiagnosticState(TypedDict):
     messages: List[BaseMessage]
     telemetry: str
     service_name: str
+    start_time: Optional[str]
     trace_id: Optional[str]
     time_window: Optional[str]
     alert_payload: Optional[dict[str, Any]]
@@ -28,4 +29,5 @@ class DiagnosticState(TypedDict):
     best_effort: Optional[str]
     summary: Optional[str]
     error: Optional[str]
+    diagnosis: Optional[dict[str, Any]]
 

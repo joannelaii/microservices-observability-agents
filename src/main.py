@@ -18,8 +18,8 @@ if __package__ in (None, ""):
     if repo_root not in sys.path:
         sys.path.insert(0, repo_root)
 
-from src.graph import build_graph
-from src.nodes import classify_alert_payload
+from graphs.root_graph import build_graph
+from common.util import classify_alert_payload
 
 
 PROM_ALERTS_URL = "http://localhost:9090/api/v1/alerts"
@@ -111,6 +111,7 @@ def diagnose(payload: dict) -> None:
             "messages": [HumanMessage(content=alert_context)],
             "telemetry": "",
             "service_name": service_name,
+            "start_time": payload.get("start_time"),
             "trace_id": None,
             "time_window": None,
             "alert_payload": payload,

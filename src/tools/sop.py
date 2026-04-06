@@ -8,10 +8,9 @@ from langchain_core.embeddings import Embeddings
 from langchain_core.tools import tool
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
 from langchain_community.vectorstores import FAISS
-from langchain_openai import OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from src.backend import llm_and_embeddings
+from common.backend import llm_and_embeddings
 
 load_dotenv()
 
@@ -39,7 +38,7 @@ class SOPStore:
 
         loader = DirectoryLoader(
             sop_dir,
-            glob="**/*.md",
+            glob="*.md",
             loader_cls=TextLoader,
             loader_kwargs={"encoding": "utf-8"},
         )
@@ -124,4 +123,3 @@ def retrieve_sop(query: str) -> dict:
 #     test_query = "payment service timeout and 5xx errors"
 #     result = retrieve_sop.invoke({"query": test_query})
 #     print(result)
-
