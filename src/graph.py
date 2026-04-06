@@ -7,8 +7,7 @@ from .state import DiagnosticState
 from .nodes import (
     run_best_effort_node,
     run_main_agent_node,
-    run_code_generation_node,
-    run_code_execution_node,
+    run_coding_agent_node,
     run_reasoning_node,
     run_summariser_node,
     triage_node,
@@ -18,7 +17,6 @@ MAIN_NODE = "main_node"
 TRIAGE_NODE = "triage_node"
 REASONING_NODE = "reasoning_node"
 CODING_NODE = "coding_node"
-CODE_EXECUTION_NODE = "code_execution_node"
 SOP_TOOL = "sop_tool"
 TELEMETRY_TOOL = "telemetry_tool"
 DIAGNOSIS = "synthesize_diagnosis"
@@ -33,16 +31,6 @@ def route_next(state: DiagnosticState) -> str:
     raise ValueError(f"Unexpected action from reasoning node: {action}")
 
 
-def route_after_code_generation(state: DiagnosticState) -> str:
-    """Route from Code Generation Agent: either run next script or return insight to Reasoning."""
-    action = state["next_action"]
-    if action == CODE_EXECUTION_NODE:
-        return CODE_EXECUTION_NODE
-    if action == REASONING_NODE:
-        return REASONING_NODE
-    raise ValueError(f"Unexpected action from code generation node: {action}")
-
-
 def build_graph():
     graph = StateGraph(DiagnosticState)
 
@@ -55,8 +43,7 @@ def build_graph():
     # TODO: write triage_node function
     graph.add_node(TRIAGE_NODE, triage_node)
     graph.add_node(REASONING_NODE, run_reasoning_node)
-    graph.add_node(CODING_NODE, run_code_generation_node)
-    graph.add_node(CODE_EXECUTION_NODE, run_code_execution_node)
+    graph.add_node(CODING_NODE, run_coding_agent_node)
     graph.add_node(DIAGNOSIS, run_summariser_node)
     # TODO: write best_effort function
     graph.add_node(BEST_EFFORT, run_best_effort_node)
@@ -73,9 +60,8 @@ def build_graph():
     # Telemetry tool loops back to reasoning
     graph.add_edge(TELEMETRY_TOOL, REASONING_NODE)
 
-    # Coding sub-loop: Code Generation ↔ Code Execution, then back to Reasoning
-    graph.add_conditional_edges(CODING_NODE, route_after_code_generation)
-    graph.add_edge(CODE_EXECUTION_NODE, CODING_NODE)
+    # Coding agent handles its tool loop internally, then returns to reasoning
+    graph.add_edge(CODING_NODE, REASONING_NODE)
 
     # ending nodes
     graph.add_edge(DIAGNOSIS, END)
