@@ -129,6 +129,10 @@ When you have gathered enough information to answer the task, respond with a con
 - Do NOT phrase it as "I did..." or "I checked..." — state the facts directly (e.g. "The checkout pod is Running with 21 restarts, last terminated due to OOMKilled.")
 - Do NOT include a tool call in your final message — the absence of tool calls signals that you are done
 Your final answer is passed directly to the Reasoning Agent as the diagnostic result.
+
+## If the Task Cannot Be Completed with Available Tools
+If the task requires capabilities beyond what the available tools provide, respond with exactly this format:
+CANNOT_COMPLETE: <1-2 sentences brief explanation of why the task cannot be completed>
 """
 
 SUMMARISER_SYSTEM_PROMPT = """
