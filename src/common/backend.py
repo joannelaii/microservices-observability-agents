@@ -18,7 +18,7 @@ def llm_and_embeddings() -> LLM_EMBEDDING:
     if "OPENAI_API_KEY" in os.environ:
         return {
             "embeddings": OpenAIEmbeddings(),
-            "llm": ChatOpenAI(model="gpt-4o-mini", temperature=0),
+            "llm": ChatOpenAI(model="gpt-5.4-mini", temperature=0),
         }
     __endpoint = os.environ.get("OLLAMA_ENDPOINT")
     __token = os.environ.get("OLLAMA_TOKEN")

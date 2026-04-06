@@ -19,6 +19,7 @@ class DiagnosticState(TypedDict):
     diagnostic_plan: Optional[str]
     sop_guidance: Optional[str]
     sop_content: Optional[str]
+    coding_task: Optional[str]
     code_analysis: Optional[str]
     reasoning_output: Optional[str]
 

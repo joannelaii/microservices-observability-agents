@@ -4,7 +4,7 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode
 from common.state import DiagnosticState
 from nodes.reasoning import run_reasoning_node
-from nodes.nodes import run_code_expert_node
+from nodes.nodes import run_coding_agent_node
 from tools.sop import retrieve_sop
 from tools.telemetry import get_relevant_telemetry
 
@@ -29,12 +29,12 @@ def build_reasoning_graph():
     graph.add_node(REASONING_NODE, run_reasoning_node)
     graph.add_node(SOP_TOOL, ToolNode([retrieve_sop]))
     graph.add_node(TELEMETRY_TOOL, ToolNode([get_relevant_telemetry]))
-    graph.add_node(CODING_NODE, run_code_expert_node)
+    graph.add_node(CODING_NODE, run_coding_agent_node)
+
     graph.add_edge(START, REASONING_NODE)
     graph.add_edge(SOP_TOOL, REASONING_NODE)
     graph.add_edge(TELEMETRY_TOOL, REASONING_NODE)
     graph.add_edge(CODING_NODE, REASONING_NODE)
-    # Conditional routing from reasoning (code expert, telemetry, or diagnosis)
     
     graph.add_conditional_edges(
         REASONING_NODE,
