@@ -13,6 +13,8 @@ def run_synthesis_node(state: DiagnosticState) -> DiagnosticState:
         content=f"""
 Service from alert: {service_name}
 Root cause found flag: {root_cause_found}
+Start Time: {state.get("start_time", "")}
+End Time: {state.get("end_time", "")}
 
 Reasoning verdict:
 {reasoning_output}
@@ -31,6 +33,8 @@ Convert this into the required JSON schema.
     import json
     diagnosis = json.loads(diagnosis_text)
 
+    print("\n[SYNTHESIS]")
+    print(diagnosis, end="\n\n")
     return {
         **state,
         "diagnosis": diagnosis,
