@@ -77,41 +77,6 @@ def run_coding_agent_node(state: DiagnosticState) -> DiagnosticState:
     return {**state, "code_analysis": fallback, "next_action": "reasoning_node"}
 
 
-# Summariser Node
-def run_summariser_node(state: DiagnosticState) -> DiagnosticState:
-    """
-    Produces a conditional summary based on whether root cause was found.
-    - If root_cause_found=True: produces a 4-section structured incident report
-    - If root_cause_found=False: states root cause is inconclusive and lists best-effort findings
-    """
-    root_cause_found = state.get("root_cause_found", False)
-    reasoning_output = state.get("reasoning_output", "No reasoning output available.")
-    triage_metadata = state.get("triage_metadata", {})
-    
-    # Build the user message with explicit context about the verdict
-    verdict_flag = "TRUE" if root_cause_found else "FALSE"
-    
-    user_content = f"""
-ROOT_CAUSE_FOUND = {verdict_flag}
-
-Incident Type: {triage_metadata.get('incident_type', 'unknown')}
-Severity: {triage_metadata.get('severity', 'unknown')}
-
-Reasoning Agent Output:
-{reasoning_output}
-
-Based on the ROOT_CAUSE_FOUND flag above, format your response according to the instructions in the system prompt.
-    """
-    
-    messages = [
-        SystemMessage(content=SUMMARISER_SYSTEM_PROMPT),
-        HumanMessage(content=user_content),
-    ]
-    response = llm.invoke(messages)
-    print("==========Summariser Agent==========")
-    print(f"\nSummariser Agent returned:\n {response.content}")
-    return {**state, "summary": response.content}
-
 
 def run_best_effort_node(state: DiagnosticState) -> DiagnosticState:
     """

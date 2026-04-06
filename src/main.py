@@ -10,6 +10,7 @@ import sys
 import requests
 from langchain_core.messages import HumanMessage
 from dotenv import load_dotenv
+from common.bot import build_diagnosis_message, send_diagnosis
 
 load_dotenv()
 
@@ -90,6 +91,7 @@ def build_incident_payload(key: str, group_alerts: list[dict]) -> dict:
 
     return {
         "incident_key": key,
+        "service_name": first_labels.get("service_name"),
         "scope": first_labels.get("scope"),
         "severity": first_labels.get("severity"),
         "start_time": start_dt.isoformat(),
@@ -104,7 +106,7 @@ def diagnose(payload: dict) -> None:
 
     graph = _get_graph()
     alert_context = _payload_to_alert_context(payload)
-    service_name = payload.get("scope") or "opentelemetry-collector"
+    service_name = payload.get("service_name") or "opentelemetry-collector"
 
     result = graph.invoke(
         {
@@ -112,6 +114,7 @@ def diagnose(payload: dict) -> None:
             "telemetry": "",
             "service_name": service_name,
             "start_time": payload.get("start_time"),
+            "end_time": payload.get("end_time"),
             "trace_id": None,
             "time_window": None,
             "alert_payload": payload,
@@ -127,10 +130,12 @@ def diagnose(payload: dict) -> None:
     )
 
     triage_metadata = result.get("triage_metadata") or {}
-    summary = result.get("summary") or result.get("diagnostic_plan") or "No diagnosis available."
+    summary = result.get("summary")
+    if summary is None:
+        raise ValueError("Summariser did not return a Diagnosis object.")
 
-    message = _build_telegram_diagnosis_message(payload, triage_metadata, summary)
-    _send_to_telegram(message)
+    message = build_diagnosis_message(payload, triage_metadata, summary)
+    send_diagnosis(message)
 
 
 _GRAPH = None
@@ -176,44 +181,6 @@ def _payload_to_alert_context(payload: dict) -> str:
         f"end_time={payload.get('end_time')}\n"
         f"{details_text}"
     )
-
-
-def _build_telegram_diagnosis_message(payload: dict, triage_metadata: dict, summary: str) -> str:
-    incident_key_value = payload.get("alert_names") or "unknown"
-    triage_severity = triage_metadata.get("severity", "unknown")
-    incident_type = triage_metadata.get("incident_type", "unknown")
-
-    return (
-        f"Incident: {incident_key_value}\n"
-        f"Triage: {incident_type} [{triage_severity}]\n\n"
-        f"Diagnosis:\n{summary}"
-    )
-
-
-def _send_to_telegram(text: str) -> None:
-    token = os.getenv("TELEGRAM_TOKEN")
-    chat_ids = os.getenv("TELEGRAM_CHAT_ID", "")
-
-    missing = []
-    if not token:
-        missing.append("TELEGRAM_TOKEN")
-    if not chat_ids:
-        missing.append("TELEGRAM_CHAT_ID")
-
-    if missing:
-        print(f"[WARN] Missing {', '.join(missing)}; skipping telegram send.")
-        return
-
-    endpoint = f"https://api.telegram.org/bot{token}/sendMessage"
-    for chat_id in [cid.strip() for cid in chat_ids.split(",") if cid.strip()]:
-        try:
-            requests.post(
-                endpoint,
-                json={"chat_id": chat_id, "text": text[:4000]},
-                timeout=TELEGRAM_TIMEOUT,
-            ).raise_for_status()
-        except Exception as exc:
-            print(f"[ERROR] Failed to send diagnosis to chat_id={chat_id}: {exc}")
 
 
 def _queue_priority_from_payload(payload: dict) -> int:

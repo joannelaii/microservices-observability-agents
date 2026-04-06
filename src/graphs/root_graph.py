@@ -4,7 +4,8 @@ from .triage_graph import build_triage_graph
 from .reasoning_graph import build_reasoning_graph
 from common.state import DiagnosticState
 from nodes.synthesis import run_synthesis_node
-from nodes.nodes import run_summariser_node, run_coding_agent_node
+from nodes.nodes import run_coding_agent_node
+from nodes.summariser import run_summariser_node
 
 MAIN_NODE = "main_node"
 SUMMARIZER_NODE = "summarizer"

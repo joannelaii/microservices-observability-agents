@@ -21,18 +21,12 @@ graph TD;
 	subgraph reasoning
 	reasoning\3a__start__(<p>__start__</p>)
 	reasoning\3areasoning_node(reasoning_node)
-	reasoning\3asop_tool(sop_tool)
-	reasoning\3atelemetry_tool(telemetry_tool)
-	reasoning\3acoding_node(coding_node)
+	reasoning\3atools_node(tools_node)
 	reasoning\3a__end__(<p>__end__</p>)
 	reasoning\3a__start__ --> reasoning\3areasoning_node;
-	reasoning\3acoding_node --> reasoning\3areasoning_node;
-	reasoning\3areasoning_node -.-> reasoning\3acoding_node;
-	reasoning\3areasoning_node -.-> reasoning\3asop_tool;
-	reasoning\3areasoning_node -.-> reasoning\3atelemetry_tool;
-	reasoning\3asop_tool --> reasoning\3areasoning_node;
-	reasoning\3atelemetry_tool --> reasoning\3areasoning_node;
 	reasoning\3areasoning_node -.-> reasoning\3a__end__;
+	reasoning\3areasoning_node -.-> reasoning\3atools_node;
+	reasoning\3atools_node --> reasoning\3areasoning_node;
 	end
 	classDef default fill:#f2f0ff,line-height:1.2
 	classDef first fill-opacity:0
