@@ -1,7 +1,10 @@
-import os
-import json
-from run_main_agent import run_main_agent
-from src.backend import llm_and_embeddings
+import os, sys
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from test_main import run_main_agent
+from common.backend import llm_and_embeddings
 
 """
 SCORING RUBRIC FOR REASONING NODE TOOL USAGE EVALUATION
@@ -94,18 +97,39 @@ test_cases = [
         "expected_issue": "response_aborted",
         "incident_type": "error_rate",
         "expected_severity": "p2",
-    }
+    },
 ]
 
 # SCORING DIMENSIONS
 TOOL_APPROPRIATENESS_MAPPING = {
     "cpu": {"sop_weight": 0.3, "telemetry_weight": 0.8, "prefer_metrics": True},
     "memory": {"sop_weight": 0.3, "telemetry_weight": 0.9, "prefer_metrics": True},
-    "crash_loop": {"sop_weight": 0.4, "telemetry_weight": 0.8, "prefer_logs": True, "prefer_traces": True},
-    "database": {"sop_weight": 0.5, "telemetry_weight": 0.7, "prefer_metrics": True, "prefer_logs": True},
-    "network": {"sop_weight": 0.4, "telemetry_weight": 0.9, "prefer_metrics": True, "prefer_traces": True},
-    "error_rate": {"sop_weight": 0.4, "telemetry_weight": 0.8, "prefer_logs": True, "prefer_traces": True},
+    "crash_loop": {
+        "sop_weight": 0.4,
+        "telemetry_weight": 0.8,
+        "prefer_logs": True,
+        "prefer_traces": True,
+    },
+    "database": {
+        "sop_weight": 0.5,
+        "telemetry_weight": 0.7,
+        "prefer_metrics": True,
+        "prefer_logs": True,
+    },
+    "network": {
+        "sop_weight": 0.4,
+        "telemetry_weight": 0.9,
+        "prefer_metrics": True,
+        "prefer_traces": True,
+    },
+    "error_rate": {
+        "sop_weight": 0.4,
+        "telemetry_weight": 0.8,
+        "prefer_logs": True,
+        "prefer_traces": True,
+    },
 }
+
 
 def judge_diagnosis(telemetry: str, expected_issue: str, summary: str) -> bool:
     """Use LLM as judge to determine if the diagnosis is accurate."""
@@ -130,6 +154,7 @@ Answer with 'Yes' or 'No', followed by a brief explanation (max 50 words).
     except Exception as e:
         print(f"Error in judging: {e}")
         return False
+
 
 def score_tool_usage(
     incident_type: str,
@@ -195,14 +220,16 @@ def score_tool_usage(
 
     # Severity-based expectations
     if expected_severity == "p1" and verdict_type == "BEST_EFFORT":
-        verdict_alignment -= 10  # P1 incidents should have more definitive investigation
+        verdict_alignment -= (
+            10  # P1 incidents should have more definitive investigation
+        )
 
     # Calculate overall score (weighted average)
     overall_score = (
-        appropriateness * 0.25 +
-        sufficiency * 0.30 +
-        efficiency * 0.25 +
-        verdict_alignment * 0.20
+        appropriateness * 0.25
+        + sufficiency * 0.30
+        + efficiency * 0.25
+        + verdict_alignment * 0.20
     )
 
     return {
@@ -217,8 +244,9 @@ def score_tool_usage(
             "telemetry_calls": telemetry_call_count,
             "evidence_types": evidence_types_collected,
             "verdict": verdict_type,
-        }
+        },
     }
+
 
 def extract_tool_usage_metrics(result: dict) -> dict:
     """
@@ -240,6 +268,7 @@ def extract_tool_usage_metrics(result: dict) -> dict:
         "verdict_type": "BEST_EFFORT",
     }
 
+
 def run_tests():
     """
     Run the LLM judge tests on the agentic system.
@@ -251,7 +280,7 @@ def run_tests():
     results = []
 
     for i, test_case in enumerate(test_cases):
-        print(f"\nRunning test case {i+1}: {test_case['expected_issue']}")
+        print(f"\nRunning test case {i + 1}: {test_case['expected_issue']}")
         print(f"  Service: {test_case['service_name']}")
         print(f"  Expected Incident Type: {test_case.get('incident_type', 'unknown')}")
 
@@ -267,7 +296,9 @@ def run_tests():
                 tool_score = 0
             else:
                 # Diagnosis correctness
-                is_correct = judge_diagnosis(test_case["telemetry"], test_case["expected_issue"], summary)
+                is_correct = judge_diagnosis(
+                    test_case["telemetry"], test_case["expected_issue"], summary
+                )
 
                 # Tool usage scoring (requires instrumentation)
                 # TODO: Instrument reasoning_node to populate tool metrics
@@ -283,52 +314,63 @@ def run_tests():
                 )
                 tool_score = tool_score_dict["score"]
 
-            results.append({
-                "test_case": i+1,
-                "expected": test_case["expected_issue"],
-                "incident_type": test_case.get("incident_type", "unknown"),
-                "severity": test_case.get("expected_severity", "p3"),
-                "diagnosis_correct": is_correct,
-                "tool_usage_score": tool_score,
-                "summary": summary,
-                "reasoning": reasoning_output[:200] if reasoning_output else "N/A"
-            })
+            results.append(
+                {
+                    "test_case": i + 1,
+                    "expected": test_case["expected_issue"],
+                    "incident_type": test_case.get("incident_type", "unknown"),
+                    "severity": test_case.get("expected_severity", "p3"),
+                    "diagnosis_correct": is_correct,
+                    "tool_usage_score": tool_score,
+                    "summary": summary,
+                    "reasoning": reasoning_output[:200] if reasoning_output else "N/A",
+                }
+            )
 
             print(f"  ✓ Diagnosis Correct: {is_correct}")
             print(f"  ✓ Tool Usage Score: {tool_score:.1f}/100")
 
         except Exception as e:
-            print(f"  ✗ Error running test case {i+1}: {e}")
-            results.append({
-                "test_case": i+1,
-                "expected": test_case["expected_issue"],
-                "incident_type": test_case.get("incident_type", "unknown"),
-                "severity": test_case.get("expected_severity", "p3"),
-                "diagnosis_correct": False,
-                "tool_usage_score": 0,
-                "summary": str(e),
-                "reasoning": ""
-            })
+            print(f"  ✗ Error running test case {i + 1}: {e}")
+            results.append(
+                {
+                    "test_case": i + 1,
+                    "expected": test_case["expected_issue"],
+                    "incident_type": test_case.get("incident_type", "unknown"),
+                    "severity": test_case.get("expected_severity", "p3"),
+                    "diagnosis_correct": False,
+                    "tool_usage_score": 0,
+                    "summary": str(e),
+                    "reasoning": "",
+                }
+            )
 
     # Calculate metrics
     correct_count = sum(1 for r in results if r["diagnosis_correct"])
     total_count = len(results)
     accuracy = correct_count / total_count if total_count > 0 else 0
-    avg_tool_score = sum(r["tool_usage_score"] for r in results) / total_count if total_count > 0 else 0
+    avg_tool_score = (
+        sum(r["tool_usage_score"] for r in results) / total_count
+        if total_count > 0
+        else 0
+    )
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"TEST RESULTS SUMMARY")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"Diagnosis Accuracy: {accuracy:.2%} ({correct_count}/{total_count})")
     print(f"Avg Tool Usage Score: {avg_tool_score:.1f}/100")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     for r in results:
         status = "✓ PASS" if r["diagnosis_correct"] else "✗ FAIL"
-        print(f"Test {r['test_case']:2d}: {status} | {r['incident_type']:12s} [{r['severity']}] | Tool Score: {r['tool_usage_score']:5.1f}")
+        print(
+            f"Test {r['test_case']:2d}: {status} | {r['incident_type']:12s} [{r['severity']}] | Tool Score: {r['tool_usage_score']:5.1f}"
+        )
         print(f"         Expected: {r['expected']}")
-        if r['tool_usage_score'] == 0 and not r['diagnosis_correct']:
+        if r["tool_usage_score"] == 0 and not r["diagnosis_correct"]:
             print(f"         Error: {r['summary'][:80]}")
+
 
 if __name__ == "__main__":
     run_tests()
