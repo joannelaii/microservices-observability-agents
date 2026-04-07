@@ -1,5 +1,12 @@
 from pathlib import Path
-from src.nodes import run_reasoning_node
+import os, sys
+
+if __package__ in (None, ""):
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+
+from nodes.reasoning import run_reasoning_node
 
 sop_path = Path("src/sops/trace_telemetry.md")
 
