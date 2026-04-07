@@ -1,4 +1,5 @@
 import os, sys
+import requests
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -32,76 +33,153 @@ REQUIRED FIELDS FOR EVALUATION:
 - evidence_types_collected: Which telemetry types were retrieved (metrics, logs, traces)
 """
 
-# Define test cases based on the SOPs
-test_cases = [
-    {
-        "telemetry": "CPU utilization has been above 85% for the past 10 minutes on the user-service pods. Container CPU usage is spiking.",
-        "service_name": "user-service",
-        "expected_issue": "high_cpu",
-        "incident_type": "cpu",
-        "expected_severity": "p2",
-        # Expected investigation: Check metrics for CPU trend, query SOP for cpu tuning, check for specific service logs
-    },
-    {
-        "telemetry": "Memory usage is at 90% of limit for the order-service pods, causing OOM kills.",
-        "service_name": "order-service",
-        "expected_issue": "high_memory",
-        "incident_type": "memory",
-        "expected_severity": "p2",
-    },
-    {
-        "telemetry": "Pods in the payment-service are restarting every few minutes due to crash loops.",
-        "service_name": "payment-service",
-        "expected_issue": "crash_loop",
-        "incident_type": "crash_loop",
-        "expected_severity": "p1",
-    },
-    {
-        "telemetry": "Database query latency is exceeding 5 seconds for the inventory-service.",
-        "service_name": "inventory-service",
-        "expected_issue": "database_latency",
-        "incident_type": "database",
-        "expected_severity": "p2",
-    },
-    {
-        "telemetry": "Network packets are being corrupted between the api-gateway and backend services.",
-        "service_name": "api-gateway",
-        "expected_issue": "network_corruption",
-        "incident_type": "network",
-        "expected_severity": "p1",
-    },
-    {
-        "telemetry": "High packet loss observed in network traffic to the notification-service.",
-        "service_name": "notification-service",
-        "expected_issue": "network_loss",
-        "incident_type": "network",
-        "expected_severity": "p2",
-    },
-    {
-        "telemetry": "Pods in the auth-service are failing to start with exit code 1.",
-        "service_name": "auth-service",
-        "expected_issue": "pod_failure",
-        "incident_type": "crash_loop",
-        "expected_severity": "p1",
-    },
-    {
-        "telemetry": "Pods in the logging-service were killed due to resource constraints.",
-        "service_name": "logging-service",
-        "expected_issue": "pod_killed",
-        "incident_type": "memory",
-        "expected_severity": "p1",
-    },
-    {
-        "telemetry": "HTTP responses are being aborted midway in the search-service.",
-        "service_name": "search-service",
-        "expected_issue": "response_aborted",
-        "incident_type": "error_rate",
-        "expected_severity": "p2",
-    },
-]
+
+def fetch_real_test_cases_from_prometheus() -> list:
+    """
+    Fetch actual alerts from Prometheus and convert them to test cases.
+    Falls back to sample test cases if Prometheus is unavailable.
+    """
+    PROM_ALERTS_URL = "http://localhost:9090/api/v1/alerts"
+    ALERT_TO_INCIDENT_TYPE = {
+        "FrontendCheckoutErrorRateHigh": "error_rate",
+        "FrontendCheckoutFailuresPresent": "error_rate",
+        "CheckoutTrafficPresentButFailuresOrSlowness": "checkout-degradation",
+        "FrontendTrafficDrop": "traffic",
+        "FrontendLatencyHigh": "latency",
+        "ServiceRestartDetected": "restart",
+        "FrontendOverallErrorRateHigh": "error_rate",
+    }
+
+    try:
+        response = requests.get(PROM_ALERTS_URL, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        alerts = data.get("data", {}).get("alerts", [])
+
+        test_cases = []
+        for alert in alerts:
+            labels = alert.get("labels", {})
+            annotations = alert.get("annotations", {})
+
+            alertname = labels.get("alertname", "unknown")
+            description = annotations.get(
+                "description", annotations.get("summary", "Alert triggered")
+            )
+
+            # Extract service name - try multiple fields
+            service_name = labels.get("service_name", labels.get("scope", "unknown"))
+            if service_name in ("symptom", "unknown"):
+                service_name = "frontend"  # Default for symptom alerts
+
+            # Get incident type from the mapping
+            incident_type = ALERT_TO_INCIDENT_TYPE.get(alertname, "unknown")
+
+            # Determine severity (map warning to p2, critical to p1, etc.)
+            severity_map = {"warning": "p2", "critical": "p1", "info": "p3"}
+            severity = labels.get("severity", "warning")
+            expected_severity = severity_map.get(severity.lower(), "p3")
+
+            test_case = {
+                "telemetry": description,
+                "service_name": service_name,
+                "expected_issue": alertname,
+                "incident_type": incident_type,
+                "expected_severity": expected_severity,
+            }
+            test_cases.append(test_case)
+
+        if test_cases:
+            print(f"[INFO] Loaded {len(test_cases)} real test cases from Prometheus")
+            return test_cases
+        else:
+            print("[WARN] No alerts found in Prometheus, using fallback test cases")
+            return get_fallback_test_cases()
+    except requests.exceptions.ConnectionError:
+        print(
+            f"[WARN] Cannot connect to Prometheus at {PROM_ALERTS_URL}, using fallback test cases"
+        )
+        return get_fallback_test_cases()
+    except Exception as e:
+        print(
+            f"[WARN] Error fetching alerts from Prometheus: {e}, using fallback test cases"
+        )
+        return get_fallback_test_cases()
+
+
+def get_fallback_test_cases() -> list:
+    """Fallback test cases when Prometheus is unavailable."""
+    return [
+        {
+            "telemetry": "Error rate on /api/checkout exceeded 10% for 30s.",
+            "service_name": "frontend",
+            "expected_issue": "FrontendCheckoutErrorRateHigh",
+            "incident_type": "error_rate",
+            "expected_severity": "p2",
+        },
+        {
+            "telemetry": "Frontend /api/checkout has active 500 responses.",
+            "service_name": "frontend",
+            "expected_issue": "FrontendCheckoutFailuresPresent",
+            "incident_type": "error_rate",
+            "expected_severity": "p2",
+        },
+        {
+            "telemetry": "Active checkout traffic with either elevated failures or latency.",
+            "service_name": "frontend",
+            "expected_issue": "CheckoutTrafficPresentButFailuresOrSlowness",
+            "incident_type": "checkout-degradation",
+            "expected_severity": "p2",
+        },
+        {
+            "telemetry": "CPU utilization has been above 85% for the past 10 minutes on the user-service pods.",
+            "service_name": "user-service",
+            "expected_issue": "HighCPUUtilization",
+            "incident_type": "cpu",
+            "expected_severity": "p2",
+        },
+        {
+            "telemetry": "Memory usage is at 90% of limit for the order-service pods, causing OOM kills.",
+            "service_name": "order-service",
+            "expected_issue": "HighMemoryUsage",
+            "incident_type": "memory",
+            "expected_severity": "p2",
+        },
+    ]
+
+
+# Fetch real test cases from Prometheus
+test_cases = fetch_real_test_cases_from_prometheus()
 
 # SCORING DIMENSIONS
 TOOL_APPROPRIATENESS_MAPPING = {
+    "error_rate": {
+        "sop_weight": 0.4,
+        "telemetry_weight": 0.8,
+        "prefer_metrics": True,
+        "prefer_logs": True,
+    },
+    "checkout-degradation": {
+        "sop_weight": 0.5,
+        "telemetry_weight": 0.9,
+        "prefer_metrics": True,
+        "prefer_logs": True,
+    },
+    "traffic": {
+        "sop_weight": 0.3,
+        "telemetry_weight": 0.8,
+        "prefer_metrics": True,
+    },
+    "latency": {
+        "sop_weight": 0.3,
+        "telemetry_weight": 0.8,
+        "prefer_metrics": True,
+        "prefer_traces": True,
+    },
+    "restart": {
+        "sop_weight": 0.4,
+        "telemetry_weight": 0.7,
+        "prefer_logs": True,
+    },
     "cpu": {"sop_weight": 0.3, "telemetry_weight": 0.8, "prefer_metrics": True},
     "memory": {"sop_weight": 0.3, "telemetry_weight": 0.9, "prefer_metrics": True},
     "crash_loop": {
@@ -120,12 +198,6 @@ TOOL_APPROPRIATENESS_MAPPING = {
         "sop_weight": 0.4,
         "telemetry_weight": 0.9,
         "prefer_metrics": True,
-        "prefer_traces": True,
-    },
-    "error_rate": {
-        "sop_weight": 0.4,
-        "telemetry_weight": 0.8,
-        "prefer_logs": True,
         "prefer_traces": True,
     },
 }
