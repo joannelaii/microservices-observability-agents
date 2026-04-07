@@ -10,7 +10,6 @@ import sys
 import requests
 from langchain_core.messages import HumanMessage
 from dotenv import load_dotenv
-from common.bot import build_diagnosis_message, send_diagnosis
 
 load_dotenv()
 
@@ -18,6 +17,9 @@ if __package__ in (None, ""):
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     if repo_root not in sys.path:
         sys.path.insert(0, repo_root)
+    from src.bot import build_diagnosis_message, send_diagnosis, start_bot_thread
+else:
+    from .bot import build_diagnosis_message, send_diagnosis, start_bot_thread
 
 from graphs.root_graph import build_graph
 from common.util import classify_alert_payload
@@ -207,6 +209,7 @@ def main() -> None:
     firing: set[str] = set()
     alert_queue: list[tuple[int, float, int, str, dict]] = []
     queue_counter = count()
+    start_bot_thread()
 
     try:
         while True:
@@ -239,6 +242,9 @@ def main() -> None:
                         (priority, now, next(queue_counter), key, payload),
                     )
                     triggered_timestamp[key] = now
+
+                    # TODO: for test purposes, breaks after the first alert group is queued.
+                    break
 
             while alert_queue:
                 _, _, _, queue_key, queue_payload = heapq.heappop(alert_queue)
