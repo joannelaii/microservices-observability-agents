@@ -44,6 +44,9 @@ Do not give a final diagnosis until you have either:
 1. enough evidence to identify a likely root cause, or
 2. exhausted reasonable investigation and must provide a best-effort conclusion.
 
+When a Trace ID is provided, investigate that exact trace first.
+For trace investigations, call the telemetry tool with the exact trace_id instead of searching for candidate traces by time window alone.
+
 While you are still investigating, do not output a verdict.
 When you decide to conclude, do not call any tool. Instead, write your final diagnosis.
 

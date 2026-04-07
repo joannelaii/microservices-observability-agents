@@ -38,7 +38,6 @@ Service reported in alert: {state.get("service_name", "unknown")}
 Trace ID from alert: {state.get("trace_id", "N/A")}
 Start time: {state.get("start_time", "N/A")}
 End time: {state.get("end_time", "N/A")}
-Time window: {state.get("time_window", "N/A")}
 
 ## Initial Telemetry Snapshot
 {state.get("telemetry", "N/A")}
@@ -49,8 +48,9 @@ Time window: {state.get("time_window", "N/A")}
 ## Code Analysis
 {state.get("code_analysis", "N/A")}
 
-Use the exact Start time and End time above in any telemetry tool call.
-Do not invent timestamps.
+If Start time and End time are available, use those exact values in telemetry tool calls.
+If only a Trace ID is available, use a trace_id-only telemetry tool call and do not invent timestamps.
+If a Trace ID is provided, investigate that exact trace instead of searching for unrelated candidate traces.
 """
             ),
         ]

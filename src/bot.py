@@ -4,9 +4,10 @@ import os
 import re
 import threading
 from datetime import datetime, timedelta, timezone
+from itertools import count
+from queue import PriorityQueue
 from typing import Optional
 
-from langchain_core.messages import HumanMessage
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -18,14 +19,15 @@ from telegram.ext import (
 )
 
 from .common.state import Diagnosis
-from .graphs.root_graph import build_graph
-
 TELEGRAM_TIMEOUT = 10
 SGT = timezone(timedelta(hours=8))
+TELEGRAM_REQUEST_PRIORITY = 100
 _BOT_THREAD: Optional[threading.Thread] = None
 _BOT_LOOP: Optional[asyncio.AbstractEventLoop] = None
 _BOT_APP: Optional[Application] = None
 _BOT_READY = threading.Event()
+WORK_QUEUE: PriorityQueue = PriorityQueue()
+_QUEUE_COUNTER = count()
 
 
 def build_diagnosis_message(
@@ -117,61 +119,7 @@ def format_time_range(start_iso, end_iso) -> str:
 
 class ObservabilityBotManager:
     def __init__(self):
-        self.graph = build_graph()
-
-    def process_input(
-        self,
-        text: str,
-        service_name: str = "opentelemetry-collector",
-        time_window: str = "1h",
-    ) -> str:
-        trace_id, parsed_window = self._extract_trace_and_window(text)
-        effective_window = parsed_window or time_window
-
-        try:
-            result = self.graph.invoke(
-                {
-                    "messages": [HumanMessage(content=text)],
-                    "telemetry": "",
-                    "service_name": service_name,
-                    "start_time": None,
-                    "end_time": None,
-                    "trace_id": trace_id,
-                    "time_window": effective_window if trace_id else None,
-                    "alert_payload": None,
-                    "triage_metadata": None,
-                    "diagnostic_plan": None,
-                    "sop_guidance": None,
-                    "code_analysis": None,
-                    "reasoning_output": None,
-                    "root_cause_found": False,
-                    "next_action": "",
-                    "summary": None,
-                    "error": None,
-                    "meta_input_tokens": 0,
-                    "meta_output_tokens": 0,
-                    "meta_total_tokens": 0,
-                    "meta_duration_s": None,
-                }
-            )
-
-            summary = result.get("summary") or result.get("diagnostic_plan") or "No diagnosis available."
-            triage_metadata = result.get("triage_metadata") or {}
-
-            if trace_id:
-                incident_title = "Trace Investigation"
-            else:
-                incident_title = triage_metadata.get("incident_type", "Incident").replace("_", " ").title()
-
-            return self._format_diagnosis_response(
-                incident_title=incident_title,
-                triage_metadata=triage_metadata,
-                summary=summary,
-                trace_id=trace_id,
-                query_window=effective_window if trace_id else None,
-            )
-        except Exception as e:
-            return f"Error: {type(e).__name__}: {str(e)}"
+        pass
 
     @staticmethod
     def _detect_trace_id(text: str) -> str | None:
@@ -251,57 +199,43 @@ class ObservabilityBotManager:
             suffix = "d"
         return f"{value}{suffix}"
 
-    @staticmethod
-    def _format_diagnosis_response(
-        incident_title: str,
-        triage_metadata: dict,
-        summary: Diagnosis | str,
-        trace_id: str | None = None,
-        query_window: str | None = None,
-    ) -> str:
-        incident_type = triage_metadata.get("incident_type", "unknown")
-        severity = triage_metadata.get("severity", "unknown")
-        resolved_window = query_window or triage_metadata.get("query_window")
-
-        incident_line = f"Incident: {incident_title}"
-        if trace_id and resolved_window:
-            incident_line = f"{incident_line} ({trace_id}, {resolved_window})"
-        elif trace_id:
-            incident_line = f"{incident_line} ({trace_id})"
-        elif resolved_window:
-            incident_line = f"{incident_line} ({resolved_window})"
-
-        triage_line = f"{incident_type} [{severity}]"
-
-        if isinstance(summary, Diagnosis):
-            diagnosis_lines = [
-                f"Summary: {summary.incident.summary}",
-                f"Service: {summary.incident.service}",
-                f"Root Cause Status: {summary.root_cause_status}",
-            ]
-            if summary.root_cause:
-                diagnosis_lines.append(f"Root Cause: {summary.root_cause}")
-            diagnosis_lines.append(f"Reason: {summary.reason}")
-            if summary.evidence:
-                diagnosis_lines.append("Evidence:")
-                diagnosis_lines.extend(f"- {item}" for item in summary.evidence[:5])
-            summary_preview = "\n".join(diagnosis_lines)
-        else:
-            summary_preview = str(summary)
-
-        return (
-            f"{incident_line}\n"
-            f"Triage: {triage_line}\n\n"
-            f"Diagnosis:\n"
-            f"{summary_preview}"
-        )
 
 bot_manager = ObservabilityBotManager()
+
+
+def enqueue_work(priority: int, item: dict) -> None:
+    WORK_QUEUE.put(
+        (
+            priority,
+            datetime.now(timezone.utc).timestamp(),
+            next(_QUEUE_COUNTER),
+            item,
+        )
+    )
+
+
+def enqueue_trace_request(
+    chat_id: int,
+    text: str,
+    service_name: str = "opentelemetry-collector",
+) -> tuple[bool, str]:
+    trace_id, _ = bot_manager._extract_trace_and_window(text)
+    if not trace_id:
+        return False, "Usage: send a trace ID or /diag <trace_id>"
+
+    item = {
+        "source": "telegram",
+        "chat_id": chat_id,
+        "trace_id": trace_id,
+        "service_name": service_name,
+    }
+    enqueue_work(TELEGRAM_REQUEST_PRIORITY, item)
+    return True, f"Queued trace investigation for {trace_id}"
 
 async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
-    response = bot_manager.process_input(update.message.text)
+    ok, response = enqueue_trace_request(update.effective_chat.id, update.message.text)
     await context.bot.send_message(chat_id=update.effective_chat.id, text=response)
 
 
@@ -313,11 +247,11 @@ async def on_diag(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not text:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text="Usage: /diag <trace_id>[, <window>]\nExample: /diag abc123def456, 20m",
+            text="Usage: /diag <trace_id>\nExample: /diag abc123def456",
         )
         return
 
-    response = bot_manager.process_input(text)
+    ok, response = enqueue_trace_request(update.effective_chat.id, text)
     await context.bot.send_message(chat_id=update.effective_chat.id, text=response)
 
 
@@ -326,8 +260,7 @@ async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Welcome to Microservices Observability Bot!\n\n"
         "Send me:\n"
         "- A trace ID (e.g., 'abc123def456')\n"
-        "- A trace ID with window (e.g., 'abc123def456, 20 minutes')\n"
-        "- In groups: /diag <trace_id>[, <window>]\n\n"
+        "- In groups: /diag <trace_id>\n\n"
         "I'll diagnose the issue and suggest fixes."
     )
     await context.bot.send_message(chat_id=update.effective_chat.id, text=welcome)
@@ -414,6 +347,25 @@ def send_diagnosis(text: str) -> None:
         future.result(timeout=TELEGRAM_TIMEOUT)
     except Exception as exc:
         print(f"[ERROR] Failed to send diagnosis via telegram bot runtime: {exc}")
+
+
+def send_chat_message(chat_id: int, text: str, parse_mode: str | None = None) -> None:
+    if _BOT_LOOP is None or _BOT_APP is None:
+        print("[WARN] Telegram bot runtime not started; skipping chat send.")
+        return
+
+    async def sender() -> None:
+        await _BOT_APP.bot.send_message(
+            chat_id=chat_id,
+            text=text[:4000],
+            parse_mode=parse_mode,
+        )
+
+    try:
+        future = asyncio.run_coroutine_threadsafe(sender(), _BOT_LOOP)
+        future.result(timeout=TELEGRAM_TIMEOUT)
+    except Exception as exc:
+        print(f"[ERROR] Failed to send telegram chat message: {exc}")
 
 
 def main():

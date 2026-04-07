@@ -1,9 +1,9 @@
 import json
 import subprocess
-import heapq
 import time
+import html
 from datetime import datetime, timezone
-from itertools import count
+from queue import Empty
 import os
 import sys
 
@@ -17,9 +17,23 @@ if __package__ in (None, ""):
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     if repo_root not in sys.path:
         sys.path.insert(0, repo_root)
-    from src.bot import build_diagnosis_message, send_diagnosis, start_bot_thread
+    from src.bot import (
+        WORK_QUEUE,
+        build_diagnosis_message,
+        enqueue_work,
+        send_chat_message,
+        send_diagnosis,
+        start_bot_thread,
+    )
 else:
-    from .bot import build_diagnosis_message, send_diagnosis, start_bot_thread
+    from .bot import (
+        WORK_QUEUE,
+        build_diagnosis_message,
+        enqueue_work,
+        send_chat_message,
+        send_diagnosis,
+        start_bot_thread,
+    )
 
 from graphs.root_graph import build_graph
 from common.util import classify_alert_payload
@@ -146,6 +160,79 @@ def diagnose(payload: dict) -> None:
     send_diagnosis(message)
 
 
+def diagnose_trace_request(item: dict) -> None:
+    graph = _get_graph()
+    trace_id = item["trace_id"]
+    chat_id = item["chat_id"]
+    service_name = item.get("service_name") or "opentelemetry-collector"
+
+    started = time.perf_counter()
+    result = graph.invoke(
+        {
+            "messages": [HumanMessage(content=trace_id)],
+            "telemetry": "",
+            "service_name": service_name,
+            "start_time": None,
+            "end_time": None,
+            "trace_id": trace_id,
+            "time_window": None,
+            "alert_payload": None,
+            "triage_metadata": None,
+            "diagnostic_plan": None,
+            "sop_guidance": None,
+            "code_analysis": None,
+            "reasoning_output": None,
+            "next_action": "",
+            "summary": None,
+            "error": None,
+            "meta_input_tokens": 0,
+            "meta_output_tokens": 0,
+            "meta_total_tokens": 0,
+            "meta_duration_s": None,
+        }
+    )
+    result["meta_duration_s"] = time.perf_counter() - started
+
+    summary = result.get("summary")
+    triage_metadata = result.get("triage_metadata") or {}
+    start_time = result.get("start_time")
+    end_time = result.get("end_time")
+    window_text = f"{start_time or 'N/A'} -> {end_time or 'N/A'}"
+    if summary is None:
+        raise ValueError("Summariser did not return a Diagnosis object.")
+
+    incident_type = triage_metadata.get("incident_type", "trace_investigation")
+    severity = triage_metadata.get("severity", "p2")
+    lines = [
+        f"<b>Incident:</b> Trace Investigation ({html.escape(trace_id)})",
+        f"<b>Triage:</b> {html.escape(f'{incident_type} [{severity}]')}",
+        "",
+        f"<b>Summary:</b> {html.escape(summary.incident.summary)}",
+        f"<b>Service:</b> {html.escape(summary.incident.service)}",
+        f"<b>Trace Window:</b> {html.escape(window_text)}",
+        f"<b>Root Cause Status:</b> {html.escape(summary.root_cause_status)}",
+    ]
+    if summary.root_cause:
+        lines.append(f"<b>Root Cause:</b> {html.escape(summary.root_cause)}")
+    lines.append(f"<b>Reason:</b> {html.escape(summary.reason)}")
+    if summary.evidence:
+        lines.append("<b>Evidence:</b>")
+        lines.extend(f"- {html.escape(item)}" for item in summary.evidence[:5])
+    lines.extend(
+        [
+            "",
+            "----------------------",
+            "<b>METADATA</b>",
+            (
+                f"Tokens: {int(result.get('meta_input_tokens', 0) or 0)} in / "
+                f"{int(result.get('meta_output_tokens', 0) or 0)} out / "
+                f"{int(result.get('meta_total_tokens', 0) or 0)} total"
+            ),
+        ]
+    )
+    send_chat_message(chat_id, "\n".join(lines), parse_mode="HTML")
+
+
 _GRAPH = None
 
 
@@ -207,8 +294,7 @@ def fetch_alerts() -> list[dict]:
 def main() -> None:
     triggered_timestamp: dict[str, float] = {}
     firing: set[str] = set()
-    alert_queue: list[tuple[int, float, int, str, dict]] = []
-    queue_counter = count()
+    alert_test_queued = False
     start_bot_thread()
 
     try:
@@ -231,28 +317,45 @@ def main() -> None:
 
             is_fired: set[str] = set(groups.keys())
 
-            for key, group_alerts in groups.items():
-                cooldown_expired = now - triggered_timestamp.get(key, 0) >= TRIGGER_COOLDOWN
+            if not alert_test_queued:
+                for key, group_alerts in groups.items():
+                    cooldown_expired = now - triggered_timestamp.get(key, 0) >= TRIGGER_COOLDOWN
 
-                if key not in firing or cooldown_expired:
-                    payload = build_incident_payload(key, group_alerts)
-                    priority = _queue_priority_from_payload(payload)
-                    heapq.heappush(
-                        alert_queue,
-                        (priority, now, next(queue_counter), key, payload),
-                    )
-                    triggered_timestamp[key] = now
+                    if key not in firing or cooldown_expired:
+                        payload = build_incident_payload(key, group_alerts)
+                        priority = _queue_priority_from_payload(payload)
+                        enqueue_work(
+                            priority,
+                            {
+                                "source": "alert",
+                                "key": key,
+                                "payload": payload,
+                            },
+                        )
+                        triggered_timestamp[key] = now
+                        alert_test_queued = True
+                        break
 
-                    # TODO: for test purposes, breaks after the first alert group is queued.
+            while True:
+                try:
+                    _, _, _, item = WORK_QUEUE.get_nowait()
+                except Empty:
                     break
 
-            while alert_queue:
-                _, _, _, queue_key, queue_payload = heapq.heappop(alert_queue)
-                print(f"[QUEUE] Processing {queue_key}")
-                try:
-                    diagnose(queue_payload)
-                except Exception as exc:
-                    print(f"[ERROR] diagnosis failed for {queue_key}: {exc}")
+                if item.get("source") == "alert":
+                    queue_key = item["key"]
+                    print(f"[QUEUE] Processing {queue_key}")
+                    try:
+                        diagnose(item["payload"])
+                    except Exception as exc:
+                        print(f"[ERROR] diagnosis failed for {queue_key}: {exc}")
+                elif item.get("source") == "telegram":
+                    queue_key = f"trace:{item.get('trace_id')}"
+                    print(f"[QUEUE] Processing {queue_key}")
+                    try:
+                        diagnose_trace_request(item)
+                    except Exception as exc:
+                        print(f"[ERROR] diagnosis failed for {queue_key}: {exc}")
 
             resolved_keys = firing - is_fired
             for key in resolved_keys:

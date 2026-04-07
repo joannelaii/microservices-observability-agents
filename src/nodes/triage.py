@@ -2,6 +2,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from common.state import DiagnosticState
 from common.util import alert_payload_to_text, classify_alert_payload, llm, usage_update
+from tools.telemetry import telemetry_service
 from .prompts import MAIN_AGENT_SYSTEM_PROMPT
 
 def run_main_agent_node(state: DiagnosticState) -> DiagnosticState:
@@ -18,8 +19,7 @@ def run_main_agent_node(state: DiagnosticState) -> DiagnosticState:
 
     if state.get("trace_id"):
         trace_id = state["trace_id"]
-        time_window = state.get("time_window", "5m")
-        query = f"Investigate trace ID: {trace_id} over {time_window}"
+        query = f"Investigate trace ID: {trace_id}"
         print(f"[MAIN AGENT] Trace investigation: {query}", file=sys.stderr)
         return {**state, "diagnostic_plan": query}
 
@@ -52,14 +52,23 @@ def triage_node(state: DiagnosticState) -> DiagnosticState:
     import sys
 
     if state.get("trace_id"):
+        start_time = state.get("start_time")
+        end_time = state.get("end_time")
+        if not start_time or not end_time:
+            start_time, end_time = telemetry_service.get_trace_window(state["trace_id"])
         triage_metadata = {
             "incident_type": "trace_investigation",
             "severity": "p2",
-            "query_window": state.get("time_window", "1h"),
+            "query_window": None,
             "query": (
                 f"Diagnose request failure using trace_id={state['trace_id']}. "
                 "Investigate error spans, downstream service failures, and latency spikes."
             ),
+        }
+        state = {
+            **state,
+            "start_time": start_time,
+            "end_time": end_time,
         }
     else:
         payload_cls = classify_alert_payload(state.get("alert_payload"))
