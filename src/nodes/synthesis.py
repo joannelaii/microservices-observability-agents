@@ -1,7 +1,7 @@
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from common.state import DiagnosticState
-from common.util import llm
+from common.util import llm, usage_update
 from .prompts import SYNTHESIS_SYSTEM_PROMPT
 
 def run_synthesis_node(state: DiagnosticState) -> DiagnosticState:
@@ -39,4 +39,5 @@ Convert this into the required JSON schema.
         **state,
         "diagnosis": diagnosis,
         "next_action": "summarizer_node",
+        **usage_update(state, response),
     }

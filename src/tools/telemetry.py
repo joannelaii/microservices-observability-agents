@@ -24,6 +24,10 @@ def to_unix_seconds(value):
     return int(dt.timestamp())
 
 
+def _iso_from_ns(value_ns: int) -> str:
+    return datetime.fromtimestamp(value_ns / 1_000_000_000, tz=timezone.utc).isoformat()
+
+
 @dataclass
 class TelemetryConfig:
     loki_base_url: str
@@ -125,19 +129,27 @@ class TelemetryService:
 
     def collect(
         self,
-        start_time: str,
-        end_time: str,
+        start_time: str | None = None,
+        end_time: str | None = None,
         service: str | None = None,
         trace_id: str | None = None,
         mode: str = "full",
     ) -> dict:
-        start_s = to_unix_seconds(start_time)
-        end_s = to_unix_seconds(end_time)
-        start_ns = start_s * 1_000_000_000
-        end_ns = end_s * 1_000_000_000
+        start_s: int | None = None
+        end_s: int | None = None
+        start_ns: int | None = None
+        end_ns: int | None = None
+        if start_time and end_time:
+            start_s = to_unix_seconds(start_time)
+            end_s = to_unix_seconds(end_time)
+            start_ns = start_s * 1_000_000_000
+            end_ns = end_s * 1_000_000_000
 
         if mode not in {"metrics", "full"}:
             raise ValueError("mode must be either 'metrics' or 'full'")
+
+        if not trace_id and (start_s is None or end_s is None):
+            raise ValueError("start_time and end_time are required unless trace_id is provided")
 
         out: dict[str, Any] = {}
         if mode == "metrics":
@@ -156,17 +168,44 @@ class TelemetryService:
         )
         out["traces"] = traces_result
 
-        trace_entries = traces_result.get("traces", [])
+        if start_ns is None or end_ns is None:
+            trace_window = self._extract_trace_window(traces_result)
+            if trace_window is not None:
+                start_ns, end_ns = trace_window
+                start_s = start_ns // 1_000_000_000
+                end_s = end_ns // 1_000_000_000
+                out["start_time"] = _iso_from_ns(start_ns)
+                out["end_time"] = _iso_from_ns(end_ns)
+        else:
+            out["start_time"] = start_time
+            out["end_time"] = end_time
+
         trace_ids = self._extract_trace_ids(traces_result)
-        out["logs"] = self._get_logs(
-            start_ns=start_ns,
-            end_ns=end_ns,
-            service=service,
-            trace_id=trace_id,
-            trace_ids=trace_ids,
-        )
+        if start_ns is not None and end_ns is not None:
+            out["logs"] = self._get_logs(
+                start_ns=start_ns,
+                end_ns=end_ns,
+                service=service,
+                trace_id=trace_id,
+                trace_ids=trace_ids,
+            )
+        else:
+            out["logs"] = {"trace_logs": []}
 
         return out
+
+    def get_trace_window(self, trace_id: str) -> tuple[str | None, str | None]:
+        traces_result = self._get_traces(
+            start_s=None,
+            end_s=None,
+            service=None,
+            trace_id=trace_id,
+        )
+        window = self._extract_trace_window(traces_result)
+        if window is None:
+            return None, None
+        start_ns, end_ns = window
+        return _iso_from_ns(start_ns), _iso_from_ns(end_ns)
 
     def _get_metrics(
         self,
@@ -270,6 +309,7 @@ class TelemetryService:
         trace_ids: list[str],
     ) -> dict:
         selected_trace_ids = trace_ids[: self.max_traces]
+        print(f"trace_ids for logs: {selected_trace_ids}")
         grouped_logs: List[Dict[str, Any]] = []
 
         for current_trace_id in selected_trace_ids:
@@ -298,8 +338,8 @@ class TelemetryService:
 
     def _get_traces(
         self,
-        start_s: int,
-        end_s: int,
+        start_s: int | None,
+        end_s: int | None,
         service: str | None,
         trace_id: str | None,
     ) -> dict:
@@ -317,6 +357,8 @@ class TelemetryService:
                 return {"error": str(e)}
 
         try:
+            if start_s is None or end_s is None:
+                raise ValueError("start_s and end_s are required for trace search")
             matches = self.tempo.search(
                 start_time=start_s,
                 end_time=end_s,
@@ -425,6 +467,34 @@ class TelemetryService:
             if trace_id:
                 trace_ids.append(trace_id)
         return trace_ids
+
+    def _extract_trace_window(self, traces_result: dict) -> tuple[int, int] | None:
+        min_start: int | None = None
+        max_end: int | None = None
+
+        for trace_entry in traces_result.get("traces", []):
+            trace = trace_entry.get("trace", {}) or {}
+            for batch in trace.get("batches", []):
+                for scope_spans in batch.get("scopeSpans", []):
+                    for span in scope_spans.get("spans", []):
+                        start_raw = span.get("startTimeUnixNano")
+                        end_raw = span.get("endTimeUnixNano")
+                        try:
+                            start_val = int(start_raw) if start_raw is not None else None
+                            end_val = int(end_raw) if end_raw is not None else None
+                        except Exception:
+                            continue
+
+                        if start_val is not None:
+                            min_start = start_val if min_start is None else min(min_start, start_val)
+                        if end_val is not None:
+                            max_end = end_val if max_end is None else max(max_end, end_val)
+
+        if min_start is None or max_end is None:
+            return None
+
+        pad_ns = 30 * 1_000_000_000
+        return min_start - pad_ns, max_end + pad_ns
     
     def _compute_step(self, start_s: int, end_s: int) -> str:
         duration = end_s - start_s
@@ -467,8 +537,8 @@ telemetry_service = TelemetryService(
 
 @tool("get_relevant_telemetry")
 def get_relevant_telemetry(
-    start_time: str,
-    end_time: str,
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
     service: Optional[str] = None,
     trace_id: Optional[str] = None,
     mode: str = "full",
@@ -483,21 +553,22 @@ def get_relevant_telemetry(
     - Request-level debugging (with trace_id)
 
     Args:
-        start_time (str):
+        start_time (str, optional):
             Start of the time range (ISO 8601 format, e.g. "2026-03-30T10:00:00Z").
 
-        end_time (str):
+        end_time (str, optional):
             End of the time range (ISO 8601 format).
 
         service (str, optional):
             Service name to filter telemetry (e.g. "payment", "frontend").
             If None, queries across all services.
 
-        trace_id (str, optional):
+            trace_id (str, optional):
             Specific trace ID to retrieve detailed trace and related logs.
             If provided:
                 - Metrics will NOT be returned
                 - Logs and traces will be filtered to this trace
+                - start_time and end_time may be omitted
 
         mode (str, optional):
             Retrieval mode. Options:

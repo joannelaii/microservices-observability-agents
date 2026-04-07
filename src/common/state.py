@@ -53,4 +53,7 @@ class DiagnosticState(TypedDict):
     best_effort: Optional[str]
     summary: Optional[Diagnosis]
     error: Optional[str]
-
+    meta_input_tokens: int
+    meta_output_tokens: int
+    meta_total_tokens: int
+    meta_duration_s: Optional[float]

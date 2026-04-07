@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from common.backend import llm_and_embeddings
 from tools.k8s import K8S_TOOLS
 from common.state import DiagnosticState
+from common.util import usage_from_response
 from dotenv import load_dotenv
 from .prompts import SUMMARISER_SYSTEM_PROMPT, CODING_AGENT_SYSTEM_PROMPT
 
@@ -21,6 +22,10 @@ def run_coding_agent_node(state: DiagnosticState) -> DiagnosticState:
     print("\n[CODING]\n")
     coding_task = state.get("coding_task") or "Investigate the incident using the available tools."
     MAX_ITERATIONS = 8
+    step_count = int(state.get("reasoning_step_count", 0) or 0)
+    input_tokens = int(state.get("meta_input_tokens", 0) or 0)
+    output_tokens = int(state.get("meta_output_tokens", 0) or 0)
+    total_tokens = int(state.get("meta_total_tokens", 0) or 0)
 
     tool_map = {t.name: t for t in K8S_TOOLS}
     llm_with_tools = llm.bind_tools(K8S_TOOLS)
@@ -45,6 +50,10 @@ def run_coding_agent_node(state: DiagnosticState) -> DiagnosticState:
     iteration = 0
     while iteration < MAX_ITERATIONS:
         response = llm_with_tools.invoke(messages)
+        usage = usage_from_response(response)
+        input_tokens += usage["input_tokens"]
+        output_tokens += usage["output_tokens"]
+        total_tokens += usage["total_tokens"]
         messages.append(response)
 
         print(f"==========Coding Agent (iteration {iteration + 1})==========")
@@ -56,6 +65,10 @@ def run_coding_agent_node(state: DiagnosticState) -> DiagnosticState:
                 **state,
                 "code_analysis": final_text,
                 "coding_task": None,
+                "reasoning_step_count": step_count + 1,
+                "meta_input_tokens": input_tokens,
+                "meta_output_tokens": output_tokens,
+                "meta_total_tokens": total_tokens,
             }
 
         for tool_call in response.tool_calls:
@@ -83,4 +96,8 @@ def run_coding_agent_node(state: DiagnosticState) -> DiagnosticState:
         **state,
         "code_analysis": fallback,
         "coding_task": None,
+        "reasoning_step_count": step_count + 1,
+        "meta_input_tokens": input_tokens,
+        "meta_output_tokens": output_tokens,
+        "meta_total_tokens": total_tokens,
     }
