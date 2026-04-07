@@ -1,3 +1,5 @@
+from typing import Literal
+
 from langgraph.graph import StateGraph, START, END
 
 from .triage_graph import build_triage_graph
@@ -15,6 +17,11 @@ CODING_NODE = "coding_node"
 SYNTHESIS_NODE = "synthesis"
 
 
+def _router(state: DiagnosticState) -> Literal["coding_node", "synthesis"]:
+    task = (state.get("coding_task") or "").strip()
+    return CODING_NODE if task else SYNTHESIS_NODE
+
+
 def build_graph():
     graph = StateGraph(DiagnosticState)
     triage_graph = build_triage_graph()
@@ -29,9 +36,15 @@ def build_graph():
 
     graph.add_edge(START, TRIAGE)
     graph.add_edge(TRIAGE, REASONING)
-    graph.add_edge(REASONING, CODING_NODE)
+    graph.add_conditional_edges(
+        REASONING,
+        _router,
+        {
+            CODING_NODE: CODING_NODE,
+            SYNTHESIS_NODE: SYNTHESIS_NODE,
+        },
+    )
     graph.add_edge(CODING_NODE, REASONING)
-    graph.add_edge(REASONING, SYNTHESIS_NODE)
     graph.add_edge(SYNTHESIS_NODE, SUMMARIZER_NODE)
     graph.add_edge(SUMMARIZER_NODE, END)
 

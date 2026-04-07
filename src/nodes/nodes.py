@@ -6,7 +6,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from common.backend import llm_and_embeddings
-from src.tools.k8s import K8S_TOOLS
+from tools.k8s import K8S_TOOLS
 from common.state import DiagnosticState
 from dotenv import load_dotenv
 from .prompts import SUMMARISER_SYSTEM_PROMPT, CODING_AGENT_SYSTEM_PROMPT
@@ -18,6 +18,7 @@ llm = llm_and_embeddings()["llm"]
 
 # Coding Agent Node
 def run_coding_agent_node(state: DiagnosticState) -> DiagnosticState:
+    print("\n[CODING]\n")
     coding_task = state.get("coding_task") or "Investigate the incident using the available tools."
     MAX_ITERATIONS = 8
 
@@ -51,7 +52,11 @@ def run_coding_agent_node(state: DiagnosticState) -> DiagnosticState:
         if not response.tool_calls:
             final_text = response.content.strip()
             print(f"Final analysis:\n{final_text}")
-            return {**state, "code_analysis": final_text, "next_action": "reasoning_node"}
+            return {
+                **state,
+                "code_analysis": final_text,
+                "coding_task": None,
+            }
 
         for tool_call in response.tool_calls:
             tool_name = tool_call["name"]
@@ -74,7 +79,11 @@ def run_coding_agent_node(state: DiagnosticState) -> DiagnosticState:
 
     fallback = f"Reached maximum of {MAX_ITERATIONS} tool call rounds without a conclusive result. Last tool result: {messages[-1].content}"
     print("Coding Agent: max iterations reached.")
-    return {**state, "code_analysis": fallback, "next_action": "reasoning_node"}
+    return {
+        **state,
+        "code_analysis": fallback,
+        "coding_task": None,
+    }
 
 
 

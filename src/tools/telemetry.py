@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import os
 import time
+import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
@@ -11,7 +12,6 @@ import requests
 from dotenv import load_dotenv
 from langchain_core.tools import tool
 
-from dotenv import load_dotenv
 load_dotenv()
 
 
@@ -129,37 +129,42 @@ class TelemetryService:
         end_time: str,
         service: str | None = None,
         trace_id: str | None = None,
-        include: list[str] | None = None,
+        mode: str = "full",
     ) -> dict:
         start_s = to_unix_seconds(start_time)
         end_s = to_unix_seconds(end_time)
         start_ns = start_s * 1_000_000_000
         end_ns = end_s * 1_000_000_000
 
-        requested = set(include or ["metrics", "logs", "traces"])
+        if mode not in {"metrics", "full"}:
+            raise ValueError("mode must be either 'metrics' or 'full'")
+
         out: dict[str, Any] = {}
-        if "metrics" in requested and trace_id is None:
+        if mode == "metrics":
             out["metrics"] = self._get_metrics(
                 start_s=start_s,
                 end_s=end_s,
                 service=service,
             )
+            return out
 
-        if "logs" in requested:
-            out["logs"] = self._get_logs(
-                start_ns=start_ns,
-                end_ns=end_ns,
-                service=service,
-                trace_id=trace_id,
-            )
+        traces_result = self._get_traces(
+            start_s=start_s,
+            end_s=end_s,
+            service=service,
+            trace_id=trace_id,
+        )
+        out["traces"] = traces_result
 
-        if "traces" in requested:
-            out["traces"] = self._get_traces(
-                start_s=start_s,
-                end_s=end_s,
-                service=service,
-                trace_id=trace_id,
-            )
+        trace_entries = traces_result.get("traces", [])
+        trace_ids = self._extract_trace_ids(traces_result)
+        out["logs"] = self._get_logs(
+            start_ns=start_ns,
+            end_ns=end_ns,
+            service=service,
+            trace_id=trace_id,
+            trace_ids=trace_ids,
+        )
 
         return out
 
@@ -213,25 +218,38 @@ class TelemetryService:
         end_ns: int,
         service: str | None,
         trace_id: str | None,
+        trace_ids: Optional[list[str]] = None,
     ) -> dict:
-        selector_parts = [f'k8s_namespace_name="{self.namespace}"']
+        namespace_selector = "{" + f'k8s_namespace_name="{self.namespace}"' + "}"
+        service_selector_parts = [f'k8s_namespace_name="{self.namespace}"']
         if service:
-            selector_parts.append(f'service_name="{service}"')
-        selector = "{" + ",".join(selector_parts) + "}"
-
-        queries = {
-            "all": selector,
-            "errors": f'{selector} |= "error"',
-            "exceptions": f'{selector} |= "exception"',
-            "timeouts": f'{selector} |= "timeout"',
-            "failures": f'{selector} |= "fail"',
-            "panic": f'{selector} |= "panic"',
-        }
+            service_selector_parts.append(f'service_name="{service}"')
+        service_selector = "{" + ",".join(service_selector_parts) + "}"
 
         if trace_id:
-            queries = {
-                "trace_logs": f'{selector} |= "{trace_id}"'
-            }
+            return self._get_logs_for_trace_ids(
+                selector=namespace_selector,
+                start_ns=start_ns,
+                end_ns=end_ns,
+                trace_ids=[trace_id],
+            )
+
+        if trace_ids:
+            return self._get_logs_for_trace_ids(
+                selector=namespace_selector,
+                start_ns=start_ns,
+                end_ns=end_ns,
+                trace_ids=trace_ids,
+            )
+
+        queries = {
+            # "all": selector,
+            "errors": f'{service_selector} |= "error"',
+            "exceptions": f'{service_selector} |= "exception"',
+            "timeouts": f'{service_selector} |= "timeout"',
+            "failures": f'{service_selector} |= "fail"',
+            "panic": f'{service_selector} |= "panic"',
+        }
 
         out = {}
         for name, query in queries.items():
@@ -244,6 +262,40 @@ class TelemetryService:
 
         return out
 
+    def _get_logs_for_trace_ids(
+        self,
+        selector: str,
+        start_ns: int,
+        end_ns: int,
+        trace_ids: list[str],
+    ) -> dict:
+        selected_trace_ids = trace_ids[: self.max_traces]
+        grouped_logs: List[Dict[str, Any]] = []
+
+        for current_trace_id in selected_trace_ids:
+            try:
+                streams = self.loki.query_range(
+                    f'{selector} | trace_id="{current_trace_id}"',
+                    start_ns,
+                    end_ns,
+                    limit=min(10, self.max_log_lines),
+                )
+                grouped_logs.append(
+                    {
+                        "trace_id": current_trace_id,
+                        "entries": self.loki.flatten(streams),
+                    }
+                )
+            except Exception as e:
+                grouped_logs.append(
+                    {
+                        "trace_id": current_trace_id,
+                        "error": str(e),
+                    }
+                )
+
+        return {"trace_logs": grouped_logs}
+
     def _get_traces(
         self,
         start_s: int,
@@ -253,7 +305,14 @@ class TelemetryService:
     ) -> dict:
         if trace_id:
             try:
-                return {"traces": [self.tempo.get_trace(trace_id)]}
+                return {
+                    "traces": [
+                        {
+                            "trace_id": trace_id,
+                            "trace": self.tempo.get_trace(trace_id),
+                        }
+                    ]
+                }
             except Exception as e:
                 return {"error": str(e)}
 
@@ -340,6 +399,7 @@ class TelemetryService:
 
                 if has_problem:
                     selected.append({
+                        "trace_id": current_trace_id,
                         "trace": trace,
                         "durationMs": match.get("durationMs", -1),
                     })
@@ -349,10 +409,22 @@ class TelemetryService:
                 reverse=True,
             )
 
-            return {"traces": [item["trace"] for item in selected[:1]]}
+            return {"traces": selected[:3]}
 
         except Exception as e:
             return {"error": str(e)}
+
+    def _extract_trace_ids(self, traces_result: dict) -> list[str]:
+        trace_ids: list[str] = []
+        for trace_entry in traces_result.get("traces", []):
+            trace_id = (
+                trace_entry.get("trace_id")
+                or trace_entry.get("traceID")
+                or trace_entry.get("traceId")
+            )
+            if trace_id:
+                trace_ids.append(trace_id)
+        return trace_ids
     
     def _compute_step(self, start_s: int, end_s: int) -> str:
         duration = end_s - start_s
@@ -399,14 +471,15 @@ def get_relevant_telemetry(
     end_time: str,
     service: Optional[str] = None,
     trace_id: Optional[str] = None,
-    include: Optional[list[str]] = None,
+    mode: str = "full",
 ) -> Dict[str, Any]:
     """
-    Retrieve telemetry data (metrics, logs, traces) from the observability stack
-    for diagnosing system issues within a specified time window.
+    Retrieve telemetry data from the observability stack for diagnosing system
+    issues within a specified time window.
 
     It can be used for:
-    - Incident-level diagnosis (no trace_id, optional service filter)
+    - Metrics-only analysis
+    - Full incident diagnosis with metrics, traces, and trace-linked logs
     - Request-level debugging (with trace_id)
 
     Args:
@@ -426,14 +499,16 @@ def get_relevant_telemetry(
                 - Metrics will NOT be returned
                 - Logs and traces will be filtered to this trace
 
-        include (list[str], optional):
-            Types of telemetry to include. Options:
-                ["metrics", "logs", "traces"]
-            Defaults to all if not provided.
+        mode (str, optional):
+            Retrieval mode. Options:
+                - "metrics": return only metrics
+                - "full": return metrics, relevant traces, and logs narrowed to
+                  the selected trace IDs
+            Defaults to "full".
 
     Returns:
         Dict[str, Any]:
-            Dictionary containing requested telemetry data:
+            Dictionary containing telemetry data. Depending on mode:
             {
                 "metrics": {...},
                 "logs": {...},
@@ -449,15 +524,20 @@ def get_relevant_telemetry(
         end_time=end_time,
         service=service,
         trace_id=trace_id,
-        include=include,
+        mode=mode,
     )
 
-# TEST
-# if __name__ == "__main__":
-#     output = get_relevant_telemetry.invoke({
-#         "start_time": "2026-03-31T00:45:00Z",
-#         "end_time": "2026-03-31T00:48:00Z",
-#         "service": "checkout",
-#         "include": ["traces"],
-#     })
-#     print(output)
+# TEST - get all telemetry for a service in last 10 minutes
+if __name__ == "__main__":
+    end_time = datetime.now(timezone.utc)
+    start_time = end_time - timedelta(minutes=10)
+
+    output = get_relevant_telemetry.invoke({
+        "start_time": start_time.isoformat().replace("+00:00", "Z"),
+        "end_time": end_time.isoformat().replace("+00:00", "Z"),
+        "service": "checkout",
+        "mode": "full",
+    })
+    s = json.dumps(output, default=str)
+    print(output)
+    print("chars: ", len(s))
