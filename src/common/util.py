@@ -1,4 +1,5 @@
 import datetime
+from typing import Any
 
 from .backend import llm_and_embeddings
 llm = llm_and_embeddings()["llm"]
@@ -130,3 +131,60 @@ def format_duration_seconds(total_seconds: int) -> str:
         return f"{total_seconds // 60}m"
     return f"{total_seconds // 3600}h"
 
+
+def usage_from_response(response: Any) -> dict[str, int]:
+    usage = getattr(response, "usage_metadata", None) or {}
+    if usage:
+        input_tokens = int(usage.get("input_tokens", 0) or 0)
+        output_tokens = int(usage.get("output_tokens", 0) or 0)
+        total_tokens = int(usage.get("total_tokens", input_tokens + output_tokens) or 0)
+        return {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens,
+        }
+
+    meta = getattr(response, "response_metadata", None) or {}
+    token_usage = meta.get("token_usage") or {}
+    if token_usage:
+        input_tokens = int(token_usage.get("prompt_tokens", 0) or 0)
+        output_tokens = int(token_usage.get("completion_tokens", 0) or 0)
+        total_tokens = int(token_usage.get("total_tokens", input_tokens + output_tokens) or 0)
+        return {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens,
+        }
+
+    if "prompt_eval_count" in meta or "eval_count" in meta:
+        input_tokens = int(meta.get("prompt_eval_count", 0) or 0)
+        output_tokens = int(meta.get("eval_count", 0) or 0)
+        return {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens,
+        }
+
+    return {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+    }
+
+
+def usage_update(state: dict[str, Any], *responses: Any) -> dict[str, int]:
+    input_tokens = int(state.get("meta_input_tokens", 0) or 0)
+    output_tokens = int(state.get("meta_output_tokens", 0) or 0)
+    total_tokens = int(state.get("meta_total_tokens", 0) or 0)
+
+    for response in responses:
+        usage = usage_from_response(response)
+        input_tokens += usage["input_tokens"]
+        output_tokens += usage["output_tokens"]
+        total_tokens += usage["total_tokens"]
+
+    return {
+        "meta_input_tokens": input_tokens,
+        "meta_output_tokens": output_tokens,
+        "meta_total_tokens": total_tokens,
+    }

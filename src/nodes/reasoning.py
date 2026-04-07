@@ -1,4 +1,6 @@
 import json
+import re
+import uuid
 from typing import Any, Dict, List
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -6,12 +8,13 @@ from pydantic import BaseModel, Field
 
 from .prompts import REASONING_AGENT_SYSTEM_PROMPT
 from common.state import DiagnosticState
-from common.util import llm
+from common.util import llm, usage_update
 from tools.sop import retrieve_sop
 from tools.telemetry import get_relevant_telemetry
 
 _REASONING_TOOLS = [retrieve_sop, get_relevant_telemetry]
 _MAX_FILTERED_BYTES = 40_000
+_CODING_TASK_RE = re.compile(r"^CODING_TASK:\s*(.+)$", re.MULTILINE)
 
 def run_reasoning_node(state: DiagnosticState) -> DiagnosticState:
     reasoning_messages = list(state.get("reasoning_messages") or [])
@@ -63,18 +66,45 @@ Do not invent timestamps.
             )
         )
 
+    has_sop = sop_content != "No SOP available."
+    has_sop_tool_result = any(
+        isinstance(msg, ToolMessage) and getattr(msg, "name", "") == "retrieve_sop"
+        for msg in reasoning_messages
+    )
+
+    if not has_sop and not has_sop_tool_result:
+        query = (
+            state.get("diagnostic_plan")
+            or f"Investigate incident affecting service {state.get('service_name', 'unknown')}"
+        )
+        tool_call = {
+            "id": str(uuid.uuid4()),
+            "name": "retrieve_sop",
+            "args": {"query": query},
+        }
+        response = AIMessage(content="", tool_calls=[tool_call])
+        print("tool_calls:", response.tool_calls)
+        return {
+            "reasoning_messages": reasoning_messages + [response],
+            "reasoning_step_count": step_count + 1,
+        }
+
     reasoning_llm = llm.bind_tools(_REASONING_TOOLS)
     response = reasoning_llm.invoke(reasoning_messages)
 
     print("tool_calls:", response.tool_calls)
+    text = str(response.content or "")
+    match = _CODING_TASK_RE.search(text)
+    coding_task = match.group(1).strip() if match else None
 
     updates: DiagnosticState = {
         "reasoning_messages": reasoning_messages + [response],
         "reasoning_step_count": step_count + 1,
+        "coding_task": coding_task,
+        **usage_update(state, response),
     }
 
     if not response.tool_calls:
-        text = str(response.content or "")
         updates["reasoning_output"] = text
         upper = text.upper()
         updates["root_cause_found"] = "VERDICT: ROOT_CAUSE_FOUND" in upper
@@ -360,9 +390,17 @@ def run_filter_node(state: DiagnosticState) -> DiagnosticState:
         t_keys = _trace_keys(data)
         l_keys = _log_keys(data)
 
-        filter_llm = llm.with_structured_output(FieldSelection)
-        selected = filter_llm.invoke(
-            f"""
+        response = llm.invoke(
+            [
+                SystemMessage(
+                    content=(
+                        "Return valid JSON only with this schema:\n"
+                        '{"trace_keys": ["..."], "log_keys": ["..."]}\n'
+                        "Do not include markdown or extra text."
+                    )
+                ),
+                HumanMessage(
+                    content=f"""
 Select only the most useful telemetry fields for debugging incidents.
 Prefer service/protocol/error/code context.
 Avoid business or app-domain-specific keys unless essential.
@@ -377,7 +415,10 @@ Trace attribute keys:
 Log keys:
 {json.dumps(l_keys)}
 """
+                ),
+            ]
         )
+        selected = FieldSelection.model_validate_json(str(response.content or "{}"))
 
         filtered = _filter_traces(data, set(selected.trace_keys))
         filtered = _filter_logs(filtered, set(selected.log_keys))
@@ -397,8 +438,14 @@ Log keys:
                 id=msg.id,
             )
         )
+        state = {**state, **usage_update(state, response)}
 
     if not saw_telemetry:
         print("no telemetry tool output in batch")
         return {}
-    return {"reasoning_messages": replacements}
+    return {
+        "reasoning_messages": replacements,
+        "meta_input_tokens": int(state.get("meta_input_tokens", 0) or 0),
+        "meta_output_tokens": int(state.get("meta_output_tokens", 0) or 0),
+        "meta_total_tokens": int(state.get("meta_total_tokens", 0) or 0),
+    }

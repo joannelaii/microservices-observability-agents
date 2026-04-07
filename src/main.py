@@ -108,6 +108,7 @@ def diagnose(payload: dict) -> None:
     alert_context = _payload_to_alert_context(payload)
     service_name = payload.get("service_name") or "opentelemetry-collector"
 
+    started = time.perf_counter()
     result = graph.invoke(
         {
             "messages": [HumanMessage(content=alert_context)],
@@ -126,15 +127,20 @@ def diagnose(payload: dict) -> None:
             "next_action": "",
             "summary": None,
             "error": None,
+            "meta_input_tokens": 0,
+            "meta_output_tokens": 0,
+            "meta_total_tokens": 0,
+            "meta_duration_s": None,
         }
     )
+    result["meta_duration_s"] = time.perf_counter() - started
 
     triage_metadata = result.get("triage_metadata") or {}
     summary = result.get("summary")
     if summary is None:
         raise ValueError("Summariser did not return a Diagnosis object.")
 
-    message = build_diagnosis_message(payload, triage_metadata, summary)
+    message = build_diagnosis_message(payload, triage_metadata, summary, result)
     send_diagnosis(message)
 
 

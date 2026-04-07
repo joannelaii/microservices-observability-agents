@@ -3,6 +3,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from common.backend import llm_and_embeddings
 from common.state import DiagnosticState, Diagnosis
+from common.util import usage_update
 from .prompts import SUMMARISER_SYSTEM_PROMPT
 
 llm = llm_and_embeddings()["llm"]
@@ -36,7 +37,7 @@ Based on the ROOT_CAUSE_FOUND flag above, format your response according to the 
         SystemMessage(content=SUMMARISER_SYSTEM_PROMPT),
         HumanMessage(content=user_content),
     ]
-    model = llm.with_structured_output(Diagnosis, method="json_schema")
-    response = model.invoke(messages)
+    response = llm.invoke(messages)
+    summary = Diagnosis.model_validate_json(response.content)
     print("[Summariser]\n")
-    return {**state, "summary": response}
+    return {**state, "summary": summary, **usage_update(state, response)}
