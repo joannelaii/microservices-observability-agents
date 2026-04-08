@@ -1,8 +1,19 @@
 from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import BaseModel
 
 from common.state import DiagnosticState
 from common.util import llm, usage_update
 from .prompts import SYNTHESIS_SYSTEM_PROMPT
+
+
+class Synthesis(BaseModel):
+    status: str
+    service: str | None
+    root_cause: str
+    evidence: list[str]
+    uncertainties: list[str]
+    next_steps: list[str]
+
 
 def run_synthesis_node(state: DiagnosticState) -> DiagnosticState:
     reasoning_output = state.get("reasoning_output") or ""
@@ -23,15 +34,13 @@ Convert this into the required JSON schema.
 """
     )
 
-    response = llm.invoke([
+    synthesis_model = llm.with_structured_output(Synthesis, include_raw=True)
+    response = synthesis_model.invoke([
         SystemMessage(content=SYNTHESIS_SYSTEM_PROMPT),
         prompt,
     ])
-
-    diagnosis_text = response.content.strip()
-
-    import json
-    diagnosis = json.loads(diagnosis_text)
+    diagnosis = response["parsed"].model_dump()
+    raw_response = response["raw"]
 
     print("\n[SYNTHESIS]")
     print(diagnosis, end="\n\n")
@@ -39,5 +48,5 @@ Convert this into the required JSON schema.
         **state,
         "diagnosis": diagnosis,
         "next_action": "summarizer_node",
-        **usage_update(state, response),
+        **usage_update(state, raw_response),
     }
