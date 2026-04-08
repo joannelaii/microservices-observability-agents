@@ -59,6 +59,7 @@ ALERT_GROUP_MAP = {
     "FrontendTrafficDrop": "frontend:symptom",
     "FrontendLatencyHigh": "frontend:symptom",
     "FraudDetectionOrdersProcessLatencyHigh": "fraud-detection:symptom",
+    "AdServiceCpuHighWithLatencyRegression": "ad:symptom",
     "ServiceRestartDetected": "infrastructure:restart",
 }
 

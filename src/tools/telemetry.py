@@ -136,6 +136,9 @@ class TelemetryService:
         self.step = step
         self.rollup_window = rollup_window
 
+    def _pod_regex(self, service: str) -> str:
+        return f"{service}-.*"
+
     def collect(
         self,
         start_time: str | None = None,
@@ -266,6 +269,28 @@ class TelemetryService:
                 f'increase(kube_pod_container_status_restarts_total{{namespace="{self.namespace}"}}[15m]))'
             ),
         }
+
+        if service:
+            pod_regex = self._pod_regex(service)
+            queries["cpu_usage"] = (
+                f'sum by (pod) ('
+                f'rate(container_cpu_usage_seconds_total{{namespace="{self.namespace}",pod=~"{pod_regex}",container!="",image!=""}}[{self.rollup_window}]))'
+            )
+            queries["cpu_throttling_ratio"] = (
+                f'sum by (pod) ('
+                f'rate(container_cpu_cfs_throttled_periods_total{{namespace="{self.namespace}",pod=~"{pod_regex}",container!=""}}[{self.rollup_window}]))'
+                f' / '
+                f'sum by (pod) ('
+                f'rate(container_cpu_cfs_periods_total{{namespace="{self.namespace}",pod=~"{pod_regex}",container!=""}}[{self.rollup_window}]))'
+            )
+            queries["cpu_limits"] = (
+                f'max by (pod, container) ('
+                f'kube_pod_container_resource_limits{{namespace="{self.namespace}",pod=~"{pod_regex}",resource="cpu"}})'
+            )
+            queries["cpu_requests"] = (
+                f'max by (pod, container) ('
+                f'kube_pod_container_resource_requests{{namespace="{self.namespace}",pod=~"{pod_regex}",resource="cpu"}})'
+            )
 
         out = {}
         for name, query in queries.items():
