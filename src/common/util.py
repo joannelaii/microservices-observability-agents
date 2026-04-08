@@ -10,7 +10,7 @@ INCIDENT_TYPE_KEYWORDS = {
     "latency": ["p95", "p99", "latency", "timeout", "slow", "response time"],
     "error_rate": ["error rate", "5xx", "http error", "failed request", "http_errors"],
     "memory": ["memory", "oom", "heap", "rss", "resident_memory"],
-    "cpu": ["cpu", "throttl", "cpu_seconds", "cpu usage"],
+    "cpu": ["cpu", "throttle", "cpu_seconds", "cpu usage"],
     "database": ["database", "db", "postgres", "mysql", "query time", "connection pool"],
     "network": ["network", "dns", "connection refused", "unreachable", "packet loss"],
 }

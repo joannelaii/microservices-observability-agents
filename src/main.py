@@ -60,6 +60,7 @@ ALERT_GROUP_MAP = {
     "FrontendLatencyHigh": "frontend:symptom",
     "FraudDetectionOrdersProcessLatencyHigh": "fraud-detection:symptom",
     "AdServiceCpuHighWithLatencyRegression": "ad:symptom",
+    "CartEmptyCartErrorsPresent": "cart:symptom",
     "ServiceRestartDetected": "infrastructure:restart",
 }
 
