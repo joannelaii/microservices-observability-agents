@@ -1,11 +1,22 @@
 import os, sys
-import requests
 
 # Add parent directory to path for imports
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+if __package__ in (None, ""):
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    src_dir = os.path.join(repo_root, 'src')
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+    if src_dir not in sys.path:
+        sys.path.insert(0, src_dir)
 
-from test_main import run_main_agent
+import requests
+from datetime import datetime, timezone
+import time
+
+from langchain_core.messages import HumanMessage
+from graphs.root_graph import build_graph
 from common.backend import llm_and_embeddings
+from src.main import _payload_to_alert_context, _get_graph, build_incident_payload, fetch_alerts, incident_key
 
 """
 SCORING RUBRIC FOR REASONING NODE TOOL USAGE EVALUATION
@@ -50,105 +61,47 @@ def fetch_real_test_cases_from_prometheus() -> list:
         "FrontendOverallErrorRateHigh": "error_rate",
     }
 
-    try:
-        response = requests.get(PROM_ALERTS_URL, timeout=5)
-        response.raise_for_status()
-        data = response.json()
-        alerts = data.get("data", {}).get("alerts", [])
+    alerts = fetch_alerts()
 
-        test_cases = []
-        for alert in alerts:
-            labels = alert.get("labels", {})
-            annotations = alert.get("annotations", {})
+    test_cases = []
+    for alert in alerts:
+        labels = alert.get("labels", {})
+        annotations = alert.get("annotations", {})
 
-            alertname = labels.get("alertname", "unknown")
-            description = annotations.get(
-                "description", annotations.get("summary", "Alert triggered")
-            )
-
-            # Extract service name - try multiple fields
-            service_name = labels.get("service_name", labels.get("scope", "unknown"))
-            if service_name in ("symptom", "unknown"):
-                service_name = "frontend"  # Default for symptom alerts
-
-            # Get incident type from the mapping
-            incident_type = ALERT_TO_INCIDENT_TYPE.get(alertname, "unknown")
-
-            # Determine severity (map warning to p2, critical to p1, etc.)
-            severity_map = {"warning": "p2", "critical": "p1", "info": "p3"}
-            severity = labels.get("severity", "warning")
-            expected_severity = severity_map.get(severity.lower(), "p3")
-
-            test_case = {
-                "telemetry": description,
-                "service_name": service_name,
-                "expected_issue": alertname,
-                "incident_type": incident_type,
-                "expected_severity": expected_severity,
-            }
-            test_cases.append(test_case)
-
-        if test_cases:
-            print(f"[INFO] Loaded {len(test_cases)} real test cases from Prometheus")
-            return test_cases
-        else:
-            print("[WARN] No alerts found in Prometheus, using fallback test cases")
-            return get_fallback_test_cases()
-    except requests.exceptions.ConnectionError:
-        print(
-            f"[WARN] Cannot connect to Prometheus at {PROM_ALERTS_URL}, using fallback test cases"
+        alertname = labels.get("alertname", "unknown")
+        description = annotations.get(
+            "description", annotations.get("summary", "Alert triggered")
         )
-        return get_fallback_test_cases()
-    except Exception as e:
-        print(
-            f"[WARN] Error fetching alerts from Prometheus: {e}, using fallback test cases"
-        )
-        return get_fallback_test_cases()
 
+        # Extract service name - try multiple fields
+        service_name = labels.get("service_name", labels.get("scope", "unknown"))
+        if service_name in ("symptom", "unknown"):
+            service_name = "frontend"  # Default for symptom alerts
 
-def get_fallback_test_cases() -> list:
-    """Fallback test cases when Prometheus is unavailable."""
-    return [
-        {
-            "telemetry": "Error rate on /api/checkout exceeded 10% for 30s.",
-            "service_name": "frontend",
-            "expected_issue": "FrontendCheckoutErrorRateHigh",
-            "incident_type": "error_rate",
-            "expected_severity": "p2",
-        },
-        {
-            "telemetry": "Frontend /api/checkout has active 500 responses.",
-            "service_name": "frontend",
-            "expected_issue": "FrontendCheckoutFailuresPresent",
-            "incident_type": "error_rate",
-            "expected_severity": "p2",
-        },
-        {
-            "telemetry": "Active checkout traffic with either elevated failures or latency.",
-            "service_name": "frontend",
-            "expected_issue": "CheckoutTrafficPresentButFailuresOrSlowness",
-            "incident_type": "checkout-degradation",
-            "expected_severity": "p2",
-        },
-        {
-            "telemetry": "CPU utilization has been above 85% for the past 10 minutes on the user-service pods.",
-            "service_name": "user-service",
-            "expected_issue": "HighCPUUtilization",
-            "incident_type": "cpu",
-            "expected_severity": "p2",
-        },
-        {
-            "telemetry": "Memory usage is at 90% of limit for the order-service pods, causing OOM kills.",
-            "service_name": "order-service",
-            "expected_issue": "HighMemoryUsage",
-            "incident_type": "memory",
-            "expected_severity": "p2",
-        },
-    ]
+        # Get incident type from the mapping
+        incident_type = ALERT_TO_INCIDENT_TYPE.get(alertname, "unknown")
 
+        # Determine severity (map warning to p2, critical to p1, etc.)
+        severity_map = {"warning": "p2", "critical": "p1", "info": "p3"}
+        severity = labels.get("severity", "warning")
+        expected_severity = severity_map.get(severity.lower(), "p3")
+
+        test_case = {
+            "alert": alert,
+            "telemetry": description,
+            "service_name": service_name,
+            "expected_issue": alertname,
+            "incident_type": incident_type,
+            "expected_severity": expected_severity,
+        }
+        test_cases.append(test_case)
+
+    print(f"[INFO] Loaded {len(test_cases)} real test cases from Prometheus")
+    return test_cases
 
 # Fetch real test cases from Prometheus
 test_cases = fetch_real_test_cases_from_prometheus()
+# test_cases = get_fallback_test_cases()
 
 # SCORING DIMENSIONS
 TOOL_APPROPRIATENESS_MAPPING = {
@@ -200,6 +153,12 @@ TOOL_APPROPRIATENESS_MAPPING = {
         "prefer_metrics": True,
         "prefer_traces": True,
     },
+    "kafka": {
+        "sop_weight": 0.5,
+        "telemetry_weight": 0.8,
+        "prefer_metrics": True,
+        "prefer_logs": True,
+    },
 }
 
 
@@ -221,6 +180,7 @@ Answer with 'Yes' or 'No', followed by a brief explanation (max 50 words).
     try:
         response = llm.invoke(judge_prompt)
         answer = response.content.strip()
+        print("Answer is", answer)
         is_correct = answer.lower().startswith("yes")
         return is_correct
     except Exception as e:
@@ -343,105 +303,117 @@ def extract_tool_usage_metrics(result: dict) -> dict:
 
 def run_tests():
     """
-    Run the LLM judge tests on the agentic system.
+    Run the LLM judge tests on the agentic system for Kafka issue detection.
 
-    Evaluates both:
-    1. Diagnosis accuracy (does output correctly identify the issue?)
-    2. Tool usage appropriateness (did reasoning node use tools efficiently?)
+    Evaluates diagnosis accuracy over multiple calls.
     """
     results = []
 
-    for i, test_case in enumerate(test_cases):
-        print(f"\nRunning test case {i + 1}: {test_case['expected_issue']}")
-        print(f"  Service: {test_case['service_name']}")
-        print(f"  Expected Incident Type: {test_case.get('incident_type', 'unknown')}")
+    # Use the single test case
+    test_case = [a for a in test_cases if a["alert"].get("state") == "firing"][0]
+    payload = build_incident_payload(incident_key(test_case["alert"]), [test_case["alert"]])
 
-        try:
-            result = run_main_agent(test_case["telemetry"], test_case["service_name"])
-            summary = result.get("summary", "")
-            reasoning_output = result.get("reasoning_output", "")
-            error = result.get("error", "")
+    print(f"Running test for Kafka issue detection")
+    print(f"  Service: {test_case['service_name']}")
+    print(f"  Expected Incident Type: {test_case.get('incident_type', 'unknown')}")
+    print(f"  Running 10 times to measure accuracy...")
 
-            if error:
-                print(f"  Agent error: {error}")
-                is_correct = False
-                tool_score = 0
-            else:
-                # Diagnosis correctness
-                is_correct = judge_diagnosis(
-                    test_case["telemetry"], test_case["expected_issue"], summary
-                )
+    for i in range(10):
+        print(f"  Run {i + 1}/10")
+        graph = _get_graph()
+        alert_context = _payload_to_alert_context(payload)
+        service_name = payload.get("service_name") or "opentelemetry-collector"
 
-                # Tool usage scoring (requires instrumentation)
-                # TODO: Instrument reasoning_node to populate tool metrics
-                tool_metrics = extract_tool_usage_metrics(result)
-                tool_score_dict = score_tool_usage(
-                    incident_type=test_case.get("incident_type", "unknown"),
-                    tool_calls_count=tool_metrics["tool_calls_count"],
-                    sop_call_count=tool_metrics["sop_call_count"],
-                    telemetry_call_count=tool_metrics["telemetry_call_count"],
-                    evidence_types_collected=tool_metrics["evidence_types_collected"],
-                    verdict_type=tool_metrics["verdict_type"],
-                    expected_severity=test_case.get("expected_severity", "p3"),
-                )
-                tool_score = tool_score_dict["score"]
+        started = time.perf_counter()
+        result = graph.invoke(
+            {
+                "messages": [HumanMessage(content=alert_context)],
+                "telemetry": "",
+                "service_name": service_name,
+                "start_time": payload.get("start_time"),
+                "end_time": payload.get("end_time"),
+                "trace_id": None,
+                "time_window": None,
+                "alert_payload": payload,
+                "triage_metadata": None,
+                "diagnostic_plan": None,
+                "sop_guidance": None,
+                "code_analysis": None,
+                "reasoning_output": None,
+                "next_action": "",
+                "summary": None,
+                "error": None,
+                "meta_input_tokens": 0,
+                "meta_output_tokens": 0,
+                "meta_total_tokens": 0,
+                "meta_duration_s": None,
+            }
+        )
+        result["meta_duration_s"] = time.perf_counter() - started
 
-            results.append(
-                {
-                    "test_case": i + 1,
-                    "expected": test_case["expected_issue"],
-                    "incident_type": test_case.get("incident_type", "unknown"),
-                    "severity": test_case.get("expected_severity", "p3"),
-                    "diagnosis_correct": is_correct,
-                    "tool_usage_score": tool_score,
-                    "summary": summary,
-                    "reasoning": reasoning_output[:200] if reasoning_output else "N/A",
-                }
+        summary_obj = result.get("summary")
+        if summary_obj is None:
+            raise ValueError("Summariser did not return a Diagnosis object.")
+        summary = summary_obj.incident.summary
+        reasoning_output = result.get("reasoning_output", "")
+        error = result.get("error", "")
+
+        if error:
+            print(f"    Agent error: {error}")
+            is_correct = False
+        else:
+            # Diagnosis correctness
+            is_correct = judge_diagnosis(
+                test_case["telemetry"], test_case["expected_issue"], summary
             )
 
-            print(f"  ✓ Diagnosis Correct: {is_correct}")
-            print(f"  ✓ Tool Usage Score: {tool_score:.1f}/100")
+        results.append(
+            {
+                "run": i + 1,
+                "expected": test_case["expected_issue"],
+                "incident_type": test_case.get("incident_type", "unknown"),
+                "severity": test_case.get("expected_severity", "p3"),
+                "diagnosis_correct": is_correct,
+                "summary": summary,
+                "reasoning": reasoning_output[:200] if reasoning_output else "N/A",
+            }
+        )
 
-        except Exception as e:
-            print(f"  ✗ Error running test case {i + 1}: {e}")
-            results.append(
-                {
-                    "test_case": i + 1,
-                    "expected": test_case["expected_issue"],
-                    "incident_type": test_case.get("incident_type", "unknown"),
-                    "severity": test_case.get("expected_severity", "p3"),
-                    "diagnosis_correct": False,
-                    "tool_usage_score": 0,
-                    "summary": str(e),
-                    "reasoning": "",
-                }
-            )
+        print(f"    ✓ Diagnosis Correct: {is_correct}")
+
+        # except Exception as e:
+        #     print(f"    ✗ Error in run {i + 1}: {e}")
+        #     results.append(
+        #         {
+        #             "run": i + 1,
+        #             "expected": test_case["expected_issue"],
+        #             "incident_type": test_case.get("incident_type", "unknown"),
+        #             "severity": test_case.get("expected_severity", "p3"),
+        #             "diagnosis_correct": False,
+        #             "summary": str(e),
+        #             "reasoning": "",
+        #         }
+        #     )
 
     # Calculate metrics
     correct_count = sum(1 for r in results if r["diagnosis_correct"])
     total_count = len(results)
     accuracy = correct_count / total_count if total_count > 0 else 0
-    avg_tool_score = (
-        sum(r["tool_usage_score"] for r in results) / total_count
-        if total_count > 0
-        else 0
-    )
 
     print(f"\n{'=' * 60}")
     print(f"TEST RESULTS SUMMARY")
     print(f"{'=' * 60}")
     print(f"Diagnosis Accuracy: {accuracy:.2%} ({correct_count}/{total_count})")
-    print(f"Avg Tool Usage Score: {avg_tool_score:.1f}/100")
     print(f"{'=' * 60}\n")
 
     for r in results:
         status = "✓ PASS" if r["diagnosis_correct"] else "✗ FAIL"
         print(
-            f"Test {r['test_case']:2d}: {status} | {r['incident_type']:12s} [{r['severity']}] | Tool Score: {r['tool_usage_score']:5.1f}"
+            f"Run {r['run']:2d}: {status} | {r['incident_type']:12s} [{r['severity']}]"
         )
         print(f"         Expected: {r['expected']}")
-        if r["tool_usage_score"] == 0 and not r["diagnosis_correct"]:
-            print(f"         Error: {r['summary'][:80]}")
+        if not r["diagnosis_correct"]:
+            print(f"         Summary: {r['summary']}")
 
 
 if __name__ == "__main__":

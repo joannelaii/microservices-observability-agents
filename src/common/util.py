@@ -13,6 +13,7 @@ INCIDENT_TYPE_KEYWORDS = {
     "cpu": ["cpu", "throttl", "cpu_seconds", "cpu usage"],
     "database": ["database", "db", "postgres", "mysql", "query time", "connection pool"],
     "network": ["network", "dns", "connection refused", "unreachable", "packet loss"],
+    "kafka": ["kafka", "broker", "message queue", "producer", "consumer"],
 }
 
 # Rule-based severity mapping

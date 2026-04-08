@@ -1,0 +1,30 @@
+[INFO] Loaded 1 real test cases from Prometheus
+
+============================================================
+KAFKA ISSUE ACCURACY TEST
+Running 10 iterations of Kafka consumer lag scenario
+============================================================
+
+Run 1/10: Testing Kafka consumer lag detection...
+Traceback (most recent call last):
+  File "C:\Users\zacha\source\repos\microservices-observability-agents\src\tests\test_llm_judge.py", line 426, in run_tests
+    print(f"  {status} | Tool Score: {tool_score:.1f}/100")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\zacha\AppData\Roaming\uv\python\cpython-3.13-windows-x86_64-none\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2717' in position 2: character maps to <undefined>
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\zacha\source\repos\microservices-observability-agents\src\tests\test_llm_judge.py", line 465, in <module>
+    run_tests()
+    ~~~~~~~~~^^
+  File "C:\Users\zacha\source\repos\microservices-observability-agents\src\tests\test_llm_judge.py", line 430, in run_tests
+    print(f"  \u2717 Error in run {run_num}: {e}")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\zacha\AppData\Roaming\uv\python\cpython-3.13-windows-x86_64-none\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2717' in position 2: character maps to <undefined>
