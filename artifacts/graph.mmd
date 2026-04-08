@@ -5,14 +5,11 @@ config:
 ---
 graph TD;
 	__start__([<p>__start__</p>]):::first
-	coding_node(coding_node)
 	synthesis(synthesis)
 	summarizer(summarizer)
 	__end__([<p>__end__</p>]):::last
 	__start__ --> triage\3amain_node;
-	coding_node --> reasoning\3a__start__;
-	reasoning\3a__end__ -.-> coding_node;
-	reasoning\3a__end__ -.-> synthesis;
+	reasoning\3a__end__ --> synthesis;
 	synthesis --> summarizer;
 	triage\3atriage_node --> reasoning\3a__start__;
 	summarizer --> __end__;
@@ -24,12 +21,15 @@ graph TD;
 	subgraph reasoning
 	reasoning\3a__start__(<p>__start__</p>)
 	reasoning\3areasoning_node(reasoning_node)
+	reasoning\3acoding_node(coding_node)
 	reasoning\3atools_node(tools_node)
 	reasoning\3afilter_node(filter_node)
 	reasoning\3a__end__(<p>__end__</p>)
 	reasoning\3a__start__ --> reasoning\3areasoning_node;
+	reasoning\3acoding_node --> reasoning\3areasoning_node;
 	reasoning\3afilter_node --> reasoning\3areasoning_node;
 	reasoning\3areasoning_node -.-> reasoning\3a__end__;
+	reasoning\3areasoning_node -.-> reasoning\3acoding_node;
 	reasoning\3areasoning_node -.-> reasoning\3atools_node;
 	reasoning\3atools_node --> reasoning\3afilter_node;
 	end
