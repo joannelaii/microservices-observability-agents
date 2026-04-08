@@ -111,6 +111,9 @@ def retrieve_sop(query: str) -> dict:
             "content": "",
         }
 
+    print("\n[SOP]")
+    print(result["source"])
+
     return {
         "found": True,
         "source": result["source"],

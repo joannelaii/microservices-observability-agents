@@ -13,14 +13,11 @@ def run_main_agent_node(state: DiagnosticState) -> DiagnosticState:
 
     Returns state with diagnostic_plan.
     """
-    import sys
-
-    print("=== MAIN AGENT NODE ===", file=sys.stderr)
 
     if state.get("trace_id"):
         trace_id = state["trace_id"]
         query = f"Investigate trace ID: {trace_id}"
-        print(f"[MAIN AGENT] Trace investigation: {query}", file=sys.stderr)
+        print(f"[MAIN AGENT] Trace investigation: {query}")
         return {**state, "diagnostic_plan": query}
 
     alert_payload = state.get("alert_payload")
@@ -33,10 +30,10 @@ def run_main_agent_node(state: DiagnosticState) -> DiagnosticState:
             ]
             response = llm.invoke(messages)
             query = response.content if hasattr(response, "content") else str(response)
-            print(f"[MAIN AGENT] Alert investigation: {query}...", file=sys.stderr)
+            print(f"[MAIN AGENT] Alert investigation: {query}...")
             return {**state, "diagnostic_plan": query, **usage_update(state, response)}
         except Exception as e:
-            print(f"[MAIN AGENT] Error processing alert: {e}", file=sys.stderr)
+            print(f"[MAIN AGENT] Error processing alert: {e}")
             return {**state, "diagnostic_plan": alert_context, "error": str(e)}
 
     return {**state, "diagnostic_plan": "No trace ID or alert payload provided"}
@@ -85,7 +82,7 @@ def triage_node(state: DiagnosticState) -> DiagnosticState:
         }
 
     print(
-        f"==========Triage: {triage_metadata['incident_type'].upper()} [{triage_metadata['severity'].upper()}]===========",
+        f"\n[TRIAGE: {triage_metadata['incident_type'].upper()} ({triage_metadata['severity'].upper()})]",
         file=sys.stderr,
     )
     print(f"Triage Query: {triage_metadata}", file=sys.stderr)

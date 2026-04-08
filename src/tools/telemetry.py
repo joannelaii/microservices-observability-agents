@@ -94,8 +94,17 @@ class PrometheusClient(HTTPClient):
 
 
 class TempoClient(HTTPClient):
-    def search(self, start_time: int, end_time: int, tags: Optional[Dict[str, str]] = None, limit: int = 20) -> List[Dict[str, Any]]:
+    def search(
+        self,
+        start_time: int,
+        end_time: int,
+        tags: Optional[Dict[str, str]] = None,
+        limit: int = 20,
+        query: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         params: Dict[str, Any] = {"start": start_time, "end": end_time, "limit": limit}
+        if query:
+            params["q"] = query
         if tags:
             for k, v in tags.items():
                 params[f"tags[{k}]"] = v
@@ -133,6 +142,7 @@ class TelemetryService:
         end_time: str | None = None,
         service: str | None = None,
         trace_id: str | None = None,
+        problem_type: str | None = None,
         mode: str = "full",
     ) -> dict:
         start_s: int | None = None
@@ -165,6 +175,7 @@ class TelemetryService:
             end_s=end_s,
             service=service,
             trace_id=trace_id,
+            problem_type=problem_type,
         )
         out["traces"] = traces_result
 
@@ -206,6 +217,20 @@ class TelemetryService:
             return None, None
         start_ns, end_ns = window
         return _iso_from_ns(start_ns), _iso_from_ns(end_ns)
+
+    def _add_span_durations(self, trace: dict[str, Any]) -> dict[str, Any]:
+        for batch in trace.get("batches", []):
+            for scope_spans in batch.get("scopeSpans", []):
+                for span in scope_spans.get("spans", []):
+                    start_ns = span.get("startTimeUnixNano")
+                    end_ns = span.get("endTimeUnixNano")
+                    if start_ns is None or end_ns is None:
+                        continue
+                    try:
+                        span["durationMs"] = round((int(end_ns) - int(start_ns)) / 1_000_000, 3)
+                    except Exception:
+                        continue
+        return trace
 
     def _get_metrics(
         self,
@@ -342,6 +367,7 @@ class TelemetryService:
         end_s: int | None,
         service: str | None,
         trace_id: str | None,
+        problem_type: str | None = None,
     ) -> dict:
         if trace_id:
             try:
@@ -349,7 +375,7 @@ class TelemetryService:
                     "traces": [
                         {
                             "trace_id": trace_id,
-                            "trace": self.tempo.get_trace(trace_id),
+                            "trace": self._add_span_durations(self.tempo.get_trace(trace_id)),
                         }
                     ]
                 }
@@ -359,13 +385,18 @@ class TelemetryService:
         try:
             if start_s is None or end_s is None:
                 raise ValueError("start_s and end_s are required for trace search")
+            query = None
+            if service:
+                query = f'{{resource.service.name="{service}"}}'
             matches = self.tempo.search(
                 start_time=start_s,
                 end_time=end_s,
                 limit=max(self.max_traces, 50),
+                query=query,
             )
 
             selected: List[Dict[str, Any]] = []
+            rank_mode = (problem_type or "error").strip().lower()
 
             for match in matches:
                 current_trace_id = match.get("traceID")
@@ -373,7 +404,7 @@ class TelemetryService:
                     continue
 
                 try:
-                    trace = self.tempo.get_trace(current_trace_id)
+                    trace = self._add_span_durations(self.tempo.get_trace(current_trace_id))
                 except Exception:
                     continue
 
@@ -439,7 +470,7 @@ class TelemetryService:
                 if service and service not in trace_services:
                     continue
 
-                if has_problem:
+                if rank_mode == "latency" or has_problem:
                     selected.append({
                         "trace_id": current_trace_id,
                         "trace": trace,
@@ -541,6 +572,7 @@ def get_relevant_telemetry(
     end_time: Optional[str] = None,
     service: Optional[str] = None,
     trace_id: Optional[str] = None,
+    problem_type: Optional[str] = None,
     mode: str = "full",
 ) -> Dict[str, Any]:
     """
@@ -563,12 +595,18 @@ def get_relevant_telemetry(
             Service name to filter telemetry (e.g. "payment", "frontend").
             If None, queries across all services.
 
-            trace_id (str, optional):
+        trace_id (str, optional):
             Specific trace ID to retrieve detailed trace and related logs.
             If provided:
                 - Metrics will NOT be returned
                 - Logs and traces will be filtered to this trace
                 - start_time and end_time may be omitted
+
+        problem_type (str, optional):
+            Optional ranking hint for trace selection when searching by time window.
+            Use:
+                - "error" for the current error-focused ranking
+                - "latency" to rank candidate traces by duration
 
         mode (str, optional):
             Retrieval mode. Options:
@@ -595,6 +633,7 @@ def get_relevant_telemetry(
         end_time=end_time,
         service=service,
         trace_id=trace_id,
+        problem_type=problem_type,
         mode=mode,
     )
 
