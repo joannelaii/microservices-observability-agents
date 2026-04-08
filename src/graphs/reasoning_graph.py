@@ -31,6 +31,8 @@ def _router(state: DiagnosticState) -> Literal["tools_node", "coding_node", "syn
         return SYNTHESIS_NODE
 
     if coding_task:
+        if step_count >= _MAX_REASONING_STEPS:
+            return SYNTHESIS_NODE
         return CODING_NODE
 
     last_message = messages[-1]
