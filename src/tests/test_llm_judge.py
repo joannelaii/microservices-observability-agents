@@ -14,7 +14,6 @@ from datetime import datetime, timezone
 import time
 
 from langchain_core.messages import HumanMessage
-from graphs.root_graph import build_graph
 from common.backend import llm_and_embeddings
 from src.main import _payload_to_alert_context, _get_graph, build_incident_payload, fetch_alerts, incident_key
 
@@ -50,7 +49,6 @@ def fetch_real_test_cases_from_prometheus() -> list:
     Fetch actual alerts from Prometheus and convert them to test cases.
     Falls back to sample test cases if Prometheus is unavailable.
     """
-    PROM_ALERTS_URL = "http://localhost:9090/api/v1/alerts"
     ALERT_TO_INCIDENT_TYPE = {
         "FrontendCheckoutErrorRateHigh": "error_rate",
         "FrontendCheckoutFailuresPresent": "error_rate",
@@ -59,6 +57,7 @@ def fetch_real_test_cases_from_prometheus() -> list:
         "FrontendLatencyHigh": "latency",
         "ServiceRestartDetected": "restart",
         "FrontendOverallErrorRateHigh": "error_rate",
+        "AdServiceCpuHighWithLatencyRegression": "cpu",
     }
 
     alerts = fetch_alerts()
@@ -349,7 +348,10 @@ def run_tests():
                 "meta_duration_s": None,
             }
         )
-        result["meta_duration_s"] = time.perf_counter() - started
+        duration = time.perf_counter() - started
+        root_cause_found = result["root_cause_found"]
+        total_tokens = result.get("meta_total_tokens", 0)
+
 
         summary_obj = result.get("summary")
         if summary_obj is None:
@@ -376,6 +378,9 @@ def run_tests():
                 "diagnosis_correct": is_correct,
                 "summary": summary,
                 "reasoning": reasoning_output[:200] if reasoning_output else "N/A",
+                "root_cause_found": root_cause_found,
+                "duration": duration,
+                "total_tokens": total_tokens,
             }
         )
 
@@ -407,13 +412,15 @@ def run_tests():
     print(f"{'=' * 60}\n")
 
     for r in results:
-        status = "✓ PASS" if r["diagnosis_correct"] else "✗ FAIL"
+        status = "✓ PASS" if r["diagnosis_correct"] and r["root_cause_found"] else "✗ FAIL"
         print(
             f"Run {r['run']:2d}: {status} | {r['incident_type']:12s} [{r['severity']}]"
         )
-        print(f"         Expected: {r['expected']}")
+        print(f"         Alert name: {r['expected']}")
         if not r["diagnosis_correct"]:
             print(f"         Summary: {r['summary']}")
+        print(f"         Duration: {r['duration']:.2f} s")
+        print(f"         Total Tokens: {r['total_tokens']}")
 
 
 if __name__ == "__main__":
