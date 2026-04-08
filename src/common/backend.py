@@ -1,6 +1,8 @@
 import os
 from typing import TypedDict
 
+from dotenv import load_dotenv
+load_dotenv()
 from langchain_core.embeddings import Embeddings
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_ollama import OllamaEmbeddings, ChatOllama
