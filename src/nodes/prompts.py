@@ -46,6 +46,9 @@ Do not give a final diagnosis until you have either:
 
 When a Trace ID is provided, investigate that exact trace first.
 For trace investigations, call the telemetry tool with the exact trace_id instead of searching for candidate traces by time window alone.
+When the affected service is known, include that service in telemetry tool calls instead of querying across all services.
+For latency symptoms, call telemetry with problem_type="latency".
+For error or failure symptoms, call telemetry with problem_type="error".
 
 While you are still investigating, do not output a verdict.
 When you decide to conclude, do not call any tool. Instead, write your final diagnosis.

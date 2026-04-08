@@ -58,6 +58,7 @@ ALERT_GROUP_MAP = {
     "CheckoutTrafficDrop": "frontend:symptom",
     "FrontendTrafficDrop": "frontend:symptom",
     "FrontendLatencyHigh": "frontend:symptom",
+    "FraudDetectionOrdersProcessLatencyHigh": "fraud-detection:symptom",
     "ServiceRestartDetected": "infrastructure:restart",
 }
 

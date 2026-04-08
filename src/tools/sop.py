@@ -27,8 +27,26 @@ class SOPStore:
         os.makedirs(index_dir, exist_ok=True)
         index_file = os.path.join(index_dir, "index.faiss")
         store_file = os.path.join(index_dir, "index.pkl")
+        sop_files = [
+            os.path.join(sop_dir, name)
+            for name in os.listdir(sop_dir)
+            if name.endswith(".md")
+        ]
+        latest_sop_time = max((os.path.getmtime(path) for path in sop_files), default=0)
+        saved_index_time = min(
+            (
+                os.path.getmtime(path)
+                for path in (index_file, store_file)
+                if os.path.exists(path)
+            ),
+            default=0,
+        )
 
-        if os.path.exists(index_file) and os.path.exists(store_file):
+        if (
+            os.path.exists(index_file)
+            and os.path.exists(store_file)
+            and saved_index_time >= latest_sop_time
+        ):
             self._vs = FAISS.load_local(
                 index_dir,
                 embeddings,
@@ -110,6 +128,9 @@ def retrieve_sop(query: str) -> dict:
             "source": "",
             "content": "",
         }
+
+    print("\n[SOP]")
+    print(result["source"])
 
     return {
         "found": True,

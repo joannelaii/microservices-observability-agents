@@ -15,6 +15,20 @@ from tools.telemetry import get_relevant_telemetry
 _REASONING_TOOLS = [retrieve_sop, get_relevant_telemetry]
 _MAX_FILTERED_BYTES = 40_000
 _CODING_TASK_RE = re.compile(r"^CODING_TASK:\s*(.+)$", re.MULTILINE)
+_DEFAULT_TRACE_KEYS = {
+    "service.name",
+    "http.method",
+    "http.url",
+    "http.status_code",
+    "rpc.service",
+    "rpc.method",
+    "rpc.grpc.status_code",
+    "exception.message",
+    "grpc.error_message",
+    "code.function.name",
+    "code.line.number",
+}
+_DEFAULT_LOG_KEYS = {"labels", "line"}
 
 def run_reasoning_node(state: DiagnosticState) -> DiagnosticState:
     reasoning_messages = list(state.get("reasoning_messages") or [])
@@ -38,6 +52,8 @@ Service reported in alert: {state.get("service_name", "unknown")}
 Trace ID from alert: {state.get("trace_id", "N/A")}
 Start time: {state.get("start_time", "N/A")}
 End time: {state.get("end_time", "N/A")}
+Incident type: {(state.get("triage_metadata") or {}).get("incident_type", "unknown")}
+Severity: {(state.get("triage_metadata") or {}).get("severity", "unknown")}
 
 ## Initial Telemetry Snapshot
 {state.get("telemetry", "N/A")}
@@ -51,6 +67,9 @@ End time: {state.get("end_time", "N/A")}
 If Start time and End time are available, use those exact values in telemetry tool calls.
 If only a Trace ID is available, use a trace_id-only telemetry tool call and do not invent timestamps.
 If a Trace ID is provided, investigate that exact trace instead of searching for unrelated candidate traces.
+If the affected service is known, always include service in telemetry tool calls.
+If the incident appears latency-related, pass problem_type="latency" to telemetry.
+If the incident appears error-related, pass problem_type="error" to telemetry.
 """
             ),
         ]
@@ -256,6 +275,8 @@ def _filter_traces(data: dict[str, Any], keep: set[str]) -> dict[str, Any]:
                         item["startTimeUnixNano"] = span["startTimeUnixNano"]
                     if span.get("endTimeUnixNano"):
                         item["endTimeUnixNano"] = span["endTimeUnixNano"]
+                    if span.get("durationMs") is not None:
+                        item["durationMs"] = span["durationMs"]
 
                     status = _compact_status(span.get("status", {}) or {})
                     if status:
@@ -281,8 +302,11 @@ def _filter_traces(data: dict[str, Any], keep: set[str]) -> dict[str, Any]:
 
 
 def _filter_logs(data: dict[str, Any], keep: set[str]) -> dict[str, Any]:
-    filtered = json.loads(json.dumps(data))
-    for trace_log in filtered.get("logs", {}).get("trace_logs", []):
+    filtered = {"logs": {"trace_logs": []}}
+    for trace_log in data.get("logs", {}).get("trace_logs", []):
+        trimmed_log: dict[str, Any] = {"trace_id": trace_log.get("trace_id")}
+        if "error" in trace_log:
+            trimmed_log["error"] = trace_log.get("error")
         entries = trace_log.get("entries", [])
         trimmed_entries: List[dict[str, Any]] = []
         for entry in entries:
@@ -291,7 +315,23 @@ def _filter_logs(data: dict[str, Any], keep: set[str]) -> dict[str, Any]:
                 if key in entry:
                     trimmed_entry[key] = entry[key]
             trimmed_entries.append(trimmed_entry)
-        trace_log["entries"] = trimmed_entries
+        trimmed_log["entries"] = trimmed_entries
+        filtered["logs"]["trace_logs"].append(trimmed_log)
+    return filtered
+
+
+def _filter_payload(data: dict[str, Any], trace_keep: set[str], log_keep: set[str]) -> dict[str, Any]:
+    filtered = {
+        key: json.loads(json.dumps(value))
+        for key, value in data.items()
+        if key not in {"traces", "logs"}
+    }
+
+    if "traces" in data:
+        filtered.update(_filter_traces(data, trace_keep))
+    if "logs" in data:
+        filtered.update(_filter_logs(data, log_keep))
+
     return filtered
 
 
@@ -352,7 +392,7 @@ def _trim_payload(data: dict[str, Any], max_bytes: int) -> dict[str, Any]:
 
 
 def run_filter_node(state: DiagnosticState) -> DiagnosticState:
-    print("[FILTER]")
+    print("\n[FILTER]")
     msgs = list(state.get("reasoning_messages") or [])
     if not msgs:
         print("no messages")
@@ -420,8 +460,14 @@ Log keys:
         )
         selected = FieldSelection.model_validate_json(str(response.content or "{}"))
 
-        filtered = _filter_traces(data, set(selected.trace_keys))
-        filtered = _filter_logs(filtered, set(selected.log_keys))
+        trace_keep = set(selected.trace_keys)
+        log_keep = set(selected.log_keys)
+        if not trace_keep and t_keys:
+            trace_keep = {key for key in t_keys if key in _DEFAULT_TRACE_KEYS}
+        if not log_keep and l_keys:
+            log_keep = {key for key in l_keys if key in _DEFAULT_LOG_KEYS}
+
+        filtered = _filter_payload(data, trace_keep, log_keep)
         filtered = _trim_payload(filtered, target_bytes)
         filtered_json = json.dumps(filtered)
 
