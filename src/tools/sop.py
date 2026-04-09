@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import TypedDict
 
 from dotenv import load_dotenv
@@ -20,8 +21,22 @@ class RetrievedSOP(TypedDict):
     content: str
 
 
+def _parse_sop_keywords(filepath: str) -> list[str]:
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            content = f.read()
+        match = re.search(r"##\s*Keywords\s*\n(.+?)(?:\n##|\Z)", content, re.DOTALL)
+        if match:
+            kw_text = match.group(1).strip()
+            return [kw.strip().lower() for kw in re.split(r"[,\n]", kw_text) if kw.strip()]
+    except Exception:
+        pass
+    return []
+
+
 class SOPStore:
     _vs: FAISS
+    _keywords: dict[str, list[str]]  # absolute source path -> parsed keyword list
 
     def __init__(self, embeddings: Embeddings, sop_dir: str, index_dir: str) -> None:
         os.makedirs(index_dir, exist_ok=True)
@@ -52,24 +67,30 @@ class SOPStore:
                 embeddings,
                 allow_dangerous_deserialization=True,
             )
-            return
+        else:
+            loader = DirectoryLoader(
+                sop_dir,
+                glob="*.md",
+                loader_cls=TextLoader,
+                loader_kwargs={"encoding": "utf-8"},
+            )
+            docs = loader.load()
 
-        loader = DirectoryLoader(
-            sop_dir,
-            glob="*.md",
-            loader_cls=TextLoader,
-            loader_kwargs={"encoding": "utf-8"},
-        )
-        docs = loader.load()
+            splitter = RecursiveCharacterTextSplitter(
+                chunk_size=1200,
+                chunk_overlap=150,
+            )
+            chunks = splitter.split_documents(docs)
 
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1200,
-            chunk_overlap=150,
-        )
-        chunks = splitter.split_documents(docs)
+            self._vs = FAISS.from_documents(chunks, embeddings)
+            self._vs.save_local(index_dir)
 
-        self._vs = FAISS.from_documents(chunks, embeddings)
-        self._vs.save_local(index_dir)
+        # Build keyword index from each SOP's ## Keywords section for re-ranking
+        self._keywords = {path: _parse_sop_keywords(path) for path in sop_files}
+
+    def _keyword_score(self, source: str, query_lower: str) -> int:
+        keywords = self._keywords.get(source, [])
+        return sum(query_lower.count(kw) for kw in keywords if kw)
 
     def search_top_sop(
         self, query: str, candidate_chunks: int = 6
@@ -89,9 +110,15 @@ class SOPStore:
             grouped[source]["best_score"] = min(grouped[source]["best_score"], float(score))
             grouped[source]["chunks"].append(doc.page_content)
 
+        # Re-rank: prefer the SOP whose keywords appear most in the query
+        # Fall back to FAISS similarity score when keyword counts are tied
+        query_lower = query.lower()
         best_source, best_data = min(
             grouped.items(),
-            key=lambda item: float(item[1]["best_score"]),
+            key=lambda item: (
+                -self._keyword_score(item[0], query_lower), # higher keyword hits -> ranked first
+                float(item[1]["best_score"]), # lower FAISS distance -> ranked first
+            ),
         )
 
         combined_content = "\n\n---\n\n".join(best_data["chunks"])
@@ -118,7 +145,7 @@ _store = SOPStore(
 @tool
 def retrieve_sop(query: str) -> dict:
     """
-    Retrieve most relevant SOP document given alarm context.
+    Retrieve most relevant SOP document given alarm context
     """
     result = _store.search_top_sop(query)
 
