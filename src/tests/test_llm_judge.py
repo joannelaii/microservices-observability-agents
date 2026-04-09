@@ -10,12 +10,15 @@ if __package__ in (None, ""):
     if src_dir not in sys.path:
         sys.path.insert(0, src_dir)
 
+from dotenv import load_dotenv
+
+load_dotenv()
+from langchain_openai import ChatOpenAI
 import requests
 from datetime import datetime, timezone
 import time
 
 from langchain_core.messages import AIMessage, HumanMessage
-from common.backend import llm_and_embeddings
 from common.state import DiagnosticState
 from src.main import (
     _payload_to_alert_context,
@@ -173,7 +176,7 @@ TOOL_APPROPRIATENESS_MAPPING = {
 
 def judge_diagnosis(telemetry: str, expected_issue: str, summary: str) -> bool:
     """Use LLM as judge to determine if the diagnosis is accurate."""
-    llm = llm_and_embeddings()["llm"]
+    llm = ChatOpenAI(model="gpt-5.4-mini", temperature=0)
 
     judge_prompt = f"""
 Telemetry: {telemetry}
