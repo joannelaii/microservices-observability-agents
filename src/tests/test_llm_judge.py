@@ -411,7 +411,7 @@ def run_tests():
     payload = build_incident_payload(
         incident_key(test_case["alert"]), [test_case["alert"]]
     )
-    total_times = 1
+    total_times = 10
 
     print(f"Running test for Kafka issue detection")
     print(f"  Service: {test_case['service_name']}")
