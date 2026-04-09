@@ -220,7 +220,7 @@ def score_tool_usage(
         }
     """
     mapping = TOOL_APPROPRIATENESS_MAPPING.get(incident_type, {})
-    
+
     # Track deductions for transparency
     deductions = []
 
@@ -257,22 +257,33 @@ def score_tool_usage(
         excess_calls = tool_calls_count - max_efficient_calls
         efficiency_penalty = excess_calls * 5
         efficiency -= efficiency_penalty
-        deductions.append({"reason": f"Efficiency penalty ({excess_calls} excess calls)", "amount": -efficiency_penalty})
+        deductions.append(
+            {
+                "reason": f"Efficiency penalty ({excess_calls} excess calls)",
+                "amount": -efficiency_penalty,
+            }
+        )
     efficiency = max(10, efficiency)  # Floor at 10
 
     # Verdict alignment: Strong verdicts require more evidence
     verdict_alignment = 100
     if verdict_type == "ROOT_CAUSE_FOUND" and tool_calls_count < 2:
         verdict_alignment = 40  # Not enough investigation for definitive verdict
-        deductions.append({"reason": "Strong verdict without sufficient investigation", "amount": -60})
+        deductions.append(
+            {"reason": "Strong verdict without sufficient investigation", "amount": -60}
+        )
     elif verdict_type == "BEST_EFFORT" and tool_calls_count == 0:
         verdict_alignment = 20  # Should have tried at least one tool
         deductions.append({"reason": "No investigation attempted", "amount": -80})
 
     # Severity-based expectations
     if expected_severity == "p1" and verdict_type == "BEST_EFFORT":
-        verdict_alignment -= 10  # P1 incidents should have more definitive investigation
-        deductions.append({"reason": "P1 severity with low confidence verdict", "amount": -10})
+        verdict_alignment -= (
+            10  # P1 incidents should have more definitive investigation
+        )
+        deductions.append(
+            {"reason": "P1 severity with low confidence verdict", "amount": -10}
+        )
 
     # Calculate overall score (weighted average)
     overall_score = (
@@ -361,7 +372,7 @@ def format_tool_score_receipt(tool_score: dict, tool_metrics: dict) -> str:
     contributions = breakdown.get("component_contributions", {})
     evidence_types = breakdown.get("evidence_types", [])
     deductions = breakdown.get("deductions", [])
-    
+
     lines = [
         f"         Tool Usage Score: {tool_score['score']:.1f}/100",
         "         Breakdown:",
@@ -527,7 +538,9 @@ def run_tests():
             )
 
     # Calculate metrics
-    correct_count = sum(1 for r in results if r["diagnosis_correct"])
+    correct_count = sum(
+        1 for r in results if r["diagnosis_correct"] and r["root_cause_found"]
+    )
     total_count = len(results)
     accuracy = correct_count / total_count if total_count > 0 else 0
 
@@ -575,5 +588,8 @@ def run_tests():
             print(f"         Total Tokens: {r['total_tokens']}")
             print(format_tool_score_receipt(r["tool_score"], r["tool_metrics"]))
             print(f"         Verdict Type: {r['tool_metrics']['verdict_type']}")
+
+
 if __name__ == "__main__":
     run_tests()
+
