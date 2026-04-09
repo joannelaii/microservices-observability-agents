@@ -4,7 +4,7 @@ import os, sys
 # Add parent directory to path for imports
 if __package__ in (None, ""):
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    src_dir = os.path.join(repo_root, 'src')
+    src_dir = os.path.join(repo_root, "src")
     if repo_root not in sys.path:
         sys.path.insert(0, repo_root)
     if src_dir not in sys.path:
@@ -17,7 +17,13 @@ import time
 from langchain_core.messages import AIMessage, HumanMessage
 from common.backend import llm_and_embeddings
 from common.state import DiagnosticState
-from src.main import _payload_to_alert_context, _get_graph, build_incident_payload, fetch_alerts, incident_key
+from src.main import (
+    _payload_to_alert_context,
+    _get_graph,
+    build_incident_payload,
+    fetch_alerts,
+    incident_key,
+)
 
 """
 SCORING RUBRIC FOR REASONING NODE TOOL USAGE EVALUATION
@@ -60,6 +66,7 @@ def fetch_real_test_cases_from_prometheus() -> list:
         "ServiceRestartDetected": "restart",
         "FrontendOverallErrorRateHigh": "error_rate",
         "AdServiceCpuHighWithLatencyRegression": "cpu",
+        "CartEmptyCartErrorsPresent": "error_rate",
     }
 
     alerts = fetch_alerts()
@@ -99,6 +106,7 @@ def fetch_real_test_cases_from_prometheus() -> list:
 
     print(f"[INFO] Loaded {len(test_cases)} real test cases from Prometheus")
     return test_cases
+
 
 # Fetch real test cases from Prometheus
 test_cases = fetch_real_test_cases_from_prometheus()
@@ -291,13 +299,13 @@ def extract_tool_usage_metrics(result: dict) -> dict:
     - verdict_type: Derived from root_cause_found ("ROOT_CAUSE_FOUND" if True, else "BEST_EFFORT")
     """
     reasoning_messages = result.get("reasoning_messages", [])
-    
+
     tool_calls_count = 0
     sop_call_count = 0
     telemetry_call_count = 0
-    
+
     for msg in reasoning_messages:
-        if isinstance(msg, AIMessage) and hasattr(msg, 'tool_calls') and msg.tool_calls:
+        if isinstance(msg, AIMessage) and hasattr(msg, "tool_calls") and msg.tool_calls:
             for tool_call in msg.tool_calls:
                 tool_name = tool_call.get("name")
                 if tool_name == "retrieve_sop":
@@ -305,17 +313,19 @@ def extract_tool_usage_metrics(result: dict) -> dict:
                 elif tool_name == "get_relevant_telemetry":
                     telemetry_call_count += 1
                 tool_calls_count += 1
-    
+
     # Derive evidence_types_collected from summary.evidence
     summary = result.get("summary")
-    if summary and hasattr(summary, 'evidence'):
+    if summary and hasattr(summary, "evidence"):
         evidence_types_collected = summary.evidence
     else:
         evidence_types_collected = []
-    
+
     # Derive verdict_type from root_cause_found
-    verdict_type = "ROOT_CAUSE_FOUND" if result.get("root_cause_found", False) else "BEST_EFFORT"
-    
+    verdict_type = (
+        "ROOT_CAUSE_FOUND" if result.get("root_cause_found", False) else "BEST_EFFORT"
+    )
+
     return {
         "tool_calls_count": tool_calls_count,
         "sop_call_count": sop_call_count,
@@ -335,8 +345,10 @@ def run_tests():
 
     # Use the single test case
     test_case = [a for a in test_cases if a["alert"].get("state") == "firing"][0]
-    payload = build_incident_payload(incident_key(test_case["alert"]), [test_case["alert"]])
-    total_times = 1
+    payload = build_incident_payload(
+        incident_key(test_case["alert"]), [test_case["alert"]]
+    )
+    total_times = 10
 
     print(f"Running test for Kafka issue detection")
     print(f"  Service: {test_case['service_name']}")
@@ -377,7 +389,6 @@ def run_tests():
         duration = time.perf_counter() - started
         root_cause_found = result["root_cause_found"]
         total_tokens = result.get("meta_total_tokens", 0)
-
 
         summary_obj = result.get("summary")
         if summary_obj is None:
@@ -444,12 +455,28 @@ def run_tests():
     correct_count = sum(1 for r in results if r["diagnosis_correct"])
     total_count = len(results)
     accuracy = correct_count / total_count if total_count > 0 else 0
-    avg_tool_score = sum(r["tool_score"]["score"] for r in results) / total_count if total_count > 0 else 0
+    avg_tool_score = (
+        sum(r["tool_score"]["score"] for r in results) / total_count
+        if total_count > 0
+        else 0
+    )
 
     # Calculate average tool metrics
-    avg_tool_calls = sum(r["tool_metrics"]["tool_calls_count"] for r in results) / total_count if total_count > 0 else 0
-    avg_sop_calls = sum(r["tool_metrics"]["sop_call_count"] for r in results) / total_count if total_count > 0 else 0
-    avg_telemetry_calls = sum(r["tool_metrics"]["telemetry_call_count"] for r in results) / total_count if total_count > 0 else 0
+    avg_tool_calls = (
+        sum(r["tool_metrics"]["tool_calls_count"] for r in results) / total_count
+        if total_count > 0
+        else 0
+    )
+    avg_sop_calls = (
+        sum(r["tool_metrics"]["sop_call_count"] for r in results) / total_count
+        if total_count > 0
+        else 0
+    )
+    avg_telemetry_calls = (
+        sum(r["tool_metrics"]["telemetry_call_count"] for r in results) / total_count
+        if total_count > 0
+        else 0
+    )
 
     print(f"\n{'=' * 60}")
     print(f"TEST RESULTS SUMMARY")
@@ -462,7 +489,9 @@ def run_tests():
     print(f"{'=' * 60}\n")
 
     for r in results:
-        status = "✓ PASS" if r["diagnosis_correct"] and r["root_cause_found"] else "✗ FAIL"
+        status = (
+            "✓ PASS" if r["diagnosis_correct"] and r["root_cause_found"] else "✗ FAIL"
+        )
         print(
             f"Run {r['run']:2d}: {status} | {r['incident_type']:12s} [{r['severity']}]"
         )
@@ -472,8 +501,12 @@ def run_tests():
         print(f"         Duration: {r['duration']:.2f} s")
         print(f"         Total Tokens: {r['total_tokens']}")
         print(f"         Tool Usage Score: {r['tool_score']['score']:.1f}/100")
-        print(f"         Tool Calls: {r['tool_metrics']['tool_calls_count']} (SOP: {r['tool_metrics']['sop_call_count']}, Telemetry: {r['tool_metrics']['telemetry_call_count']})")
-        print(f"         Evidence Types: {r['tool_metrics']['evidence_types_collected'] if r['tool_metrics']['evidence_types_collected'] else 'None'}")
+        print(
+            f"         Tool Calls: {r['tool_metrics']['tool_calls_count']} (SOP: {r['tool_metrics']['sop_call_count']}, Telemetry: {r['tool_metrics']['telemetry_call_count']})"
+        )
+        print(
+            f"         Evidence Types: {r['tool_metrics']['evidence_types_collected'] if r['tool_metrics']['evidence_types_collected'] else 'None'}"
+        )
         print(f"         Verdict Type: {r['tool_metrics']['verdict_type']}")
 
 
