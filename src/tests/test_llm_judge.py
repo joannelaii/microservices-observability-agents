@@ -285,12 +285,14 @@ def score_tool_usage(
             {"reason": "P1 severity with low confidence verdict", "amount": -10}
         )
 
-    # Calculate overall score (weighted average)
-    overall_score = (
-        appropriateness * 0.25
-        + sufficiency * 0.30
-        + efficiency * 0.25
-        + verdict_alignment * 0.20
+    # Total score is the sum of weighted component scores.
+    overall_score = sum(
+        [
+            appropriateness * 0.25,
+            sufficiency * 0.30,
+            efficiency * 0.25,
+            verdict_alignment * 0.20,
+        ]
     )
 
     return {
@@ -409,6 +411,10 @@ def format_tool_score_receipt(tool_score: dict, tool_metrics: dict) -> str:
     return "\n".join(lines)
 
 
+def _mean(values: list[float]) -> float:
+    return sum(values) / len(values) if values else 0.0
+
+
 def run_tests():
     """
     Run the LLM judge tests on the agentic system for Kafka issue detection.
@@ -507,6 +513,11 @@ def run_tests():
                     "total_tokens": total_tokens,
                     "tool_score": tool_score,
                     "tool_metrics": tool_metrics,
+                    "tool_total_score": tool_score.get("score", 0),
+                    "appropriateness": tool_score.get("appropriateness", 0),
+                    "sufficiency": tool_score.get("sufficiency", 0),
+                    "efficiency": tool_score.get("efficiency", 0),
+                    "verdict_alignment": tool_score.get("verdict_alignment", 0),
                 }
             )
 
@@ -534,6 +545,11 @@ def run_tests():
                         "evidence_types_collected": [],
                         "verdict_type": "N/A",
                     },
+                    "tool_total_score": 0,
+                    "appropriateness": 0,
+                    "sufficiency": 0,
+                    "efficiency": 0,
+                    "verdict_alignment": 0,
                 }
             )
 
@@ -543,11 +559,35 @@ def run_tests():
     )
     total_count = len(results)
     accuracy = correct_count / total_count if total_count > 0 else 0
+    avg_duration = _mean([r["duration"] for r in results])
+    avg_total_tokens = _mean([r["total_tokens"] for r in results])
+    avg_total_score = _mean([r["tool_total_score"] for r in results])
+    avg_appropriateness = _mean([r["appropriateness"] for r in results])
+    avg_sufficiency = _mean([r["sufficiency"] for r in results])
+    avg_efficiency = _mean([r["efficiency"] for r in results])
+    avg_verdict_alignment = _mean([r["verdict_alignment"] for r in results])
+
+    verdict_counts = {}
+    for r in results:
+        verdict = r.get("tool_metrics", {}).get("verdict_type", "N/A")
+        verdict_counts[verdict] = verdict_counts.get(verdict, 0) + 1
 
     print(f"\n{'=' * 60}")
     print(f"TEST RESULTS SUMMARY")
     print(f"{'=' * 60}")
     print(f"Diagnosis Accuracy: {accuracy:.2%} ({correct_count}/{total_count})")
+    print(f"Average Duration: {avg_duration:.2f} s")
+    print(f"Average Total Tokens: {avg_total_tokens:.1f}")
+    print(f"Average Total Score: {avg_total_score:.1f}/100")
+    print(f"Average Appropriateness: {avg_appropriateness:.1f}")
+    print(f"Average Sufficiency: {avg_sufficiency:.1f}")
+    print(f"Average Efficiency: {avg_efficiency:.1f}")
+    print(f"Average Verdict Alignment: {avg_verdict_alignment:.1f}")
+    if verdict_counts:
+        verdict_summary = ", ".join(
+            f"{name}={count}" for name, count in sorted(verdict_counts.items())
+        )
+        print(f"Verdict Distribution: {verdict_summary}")
     print(f"{'=' * 60}\n")
 
     # Aggregate deductions across all test runs
@@ -592,4 +632,3 @@ def run_tests():
 
 if __name__ == "__main__":
     run_tests()
-

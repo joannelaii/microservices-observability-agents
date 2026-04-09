@@ -110,8 +110,6 @@ def run_reasoning_node(state: DiagnosticState) -> DiagnosticState:
         }
 
     reasoning_llm = llm.bind_tools(_REASONING_TOOLS)
-    model_name = getattr(reasoning_llm, "model", None) or getattr(reasoning_llm, "model_name", None) or "unknown"
-    print("reasoning_agent model:", model_name)
     response = reasoning_llm.invoke(reasoning_messages)
 
     print("tool_calls:", response.tool_calls)
@@ -131,7 +129,6 @@ def run_reasoning_node(state: DiagnosticState) -> DiagnosticState:
         upper = text.upper()
         updates["root_cause_found"] = "VERDICT: ROOT_CAUSE_FOUND" in upper
 
-    print(f"{updates.get("root_cause_found", "no key in updates")}\n\n{updates.get("reasoning_output", "no key in updates")}\n\n")
     return updates
 
 
