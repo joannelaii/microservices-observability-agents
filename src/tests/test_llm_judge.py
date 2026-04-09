@@ -280,6 +280,16 @@ def score_tool_usage(
         "efficiency": efficiency,
         "verdict_alignment": verdict_alignment,
         "breakdown": {
+            "appropriateness_score": appropriateness,
+            "sufficiency_score": sufficiency,
+            "efficiency_score": efficiency,
+            "verdict_alignment_score": verdict_alignment,
+            "component_contributions": {
+                "appropriateness": appropriateness * 0.25,
+                "sufficiency": sufficiency * 0.30,
+                "efficiency": efficiency * 0.25,
+                "verdict_alignment": verdict_alignment * 0.20,
+            },
             "tool_calls_count": tool_calls_count,
             "sop_calls": sop_call_count,
             "telemetry_calls": telemetry_call_count,
@@ -335,6 +345,39 @@ def extract_tool_usage_metrics(result: dict) -> dict:
     }
 
 
+def format_tool_score_receipt(tool_score: dict, tool_metrics: dict) -> str:
+    breakdown = tool_score.get("breakdown", {})
+    contributions = breakdown.get("component_contributions", {})
+    evidence_types = breakdown.get("evidence_types", [])
+    lines = [
+        f"         Tool Usage Score: {tool_score['score']:.1f}/100",
+        "         Breakdown:",
+        f"           Appropriateness : {breakdown.get('appropriateness_score', 0):.1f}",
+        f"           Sufficiency     : {breakdown.get('sufficiency_score', 0):.1f}",
+        f"           Efficiency      : {breakdown.get('efficiency_score', 0):.1f}",
+        f"           Verdict Align.  : {breakdown.get('verdict_alignment_score', 0):.1f}",
+    ]
+
+    if contributions:
+        lines.append("         Weighted Contributions:")
+        for name, value in contributions.items():
+            label = name.replace("_", " ").capitalize()
+            lines.append(f"           {label:<15}: {value:.1f}")
+
+    lines.extend(
+        [
+            "         Tool Metrics:",
+            f"           Calls      : {tool_metrics.get('tool_calls_count', 0)}",
+            f"           SOP        : {tool_metrics.get('sop_call_count', 0)}",
+            f"           Telemetry  : {tool_metrics.get('telemetry_call_count', 0)}",
+            f"           Evidence   : {evidence_types if evidence_types else 'None'}",
+            f"           Verdict    : {breakdown.get('verdict', tool_metrics.get('verdict_type', ''))}",
+        ]
+    )
+
+    return "\n".join(lines)
+
+
 def run_tests():
     """
     Run the LLM judge tests on the agentic system for Kafka issue detection.
@@ -348,7 +391,7 @@ def run_tests():
     payload = build_incident_payload(
         incident_key(test_case["alert"]), [test_case["alert"]]
     )
-    total_times = 10
+    total_times = 1
 
     print(f"Running test for Kafka issue detection")
     print(f"  Service: {test_case['service_name']}")
@@ -357,135 +400,121 @@ def run_tests():
 
     for i in range(total_times):
         print(f"  Run {i + 1}/{total_times}")
-        graph = _get_graph()
-        alert_context = _payload_to_alert_context(payload)
-        service_name = payload.get("service_name") or "opentelemetry-collector"
+        try:
+            graph = _get_graph()
+            alert_context = _payload_to_alert_context(payload)
+            service_name = payload.get("service_name") or "opentelemetry-collector"
 
-        started = time.perf_counter()
-        result: DiagnosticState = graph.invoke(
-            {
-                "messages": [HumanMessage(content=alert_context)],
-                "telemetry": "",
-                "service_name": service_name,
-                "start_time": payload.get("start_time"),
-                "end_time": payload.get("end_time"),
-                "trace_id": None,
-                "time_window": None,
-                "alert_payload": payload,
-                "triage_metadata": None,
-                "diagnostic_plan": None,
-                "sop_guidance": None,
-                "code_analysis": None,
-                "reasoning_output": None,
-                "next_action": "",
-                "summary": None,
-                "error": None,
-                "meta_input_tokens": 0,
-                "meta_output_tokens": 0,
-                "meta_total_tokens": 0,
-                "meta_duration_s": None,
-            }
-        )
-        duration = time.perf_counter() - started
-        root_cause_found = result["root_cause_found"]
-        total_tokens = result.get("meta_total_tokens", 0)
+            started = time.perf_counter()
+            result: DiagnosticState = graph.invoke(
+                {
+                    "messages": [HumanMessage(content=alert_context)],
+                    "telemetry": "",
+                    "service_name": service_name,
+                    "start_time": payload.get("start_time"),
+                    "end_time": payload.get("end_time"),
+                    "trace_id": None,
+                    "time_window": None,
+                    "alert_payload": payload,
+                    "triage_metadata": None,
+                    "diagnostic_plan": None,
+                    "sop_guidance": None,
+                    "code_analysis": None,
+                    "reasoning_output": None,
+                    "next_action": "",
+                    "summary": None,
+                    "error": None,
+                    "meta_input_tokens": 0,
+                    "meta_output_tokens": 0,
+                    "meta_total_tokens": 0,
+                    "meta_duration_s": None,
+                }
+            )
+            duration = time.perf_counter() - started
+            root_cause_found = result["root_cause_found"]
+            total_tokens = result.get("meta_total_tokens", 0)
 
-        summary_obj = result.get("summary")
-        if summary_obj is None:
-            raise ValueError("Summariser did not return a Diagnosis object.")
-        summary = summary_obj.incident.summary
-        reasoning_output = result.get("reasoning_output", "")
-        error = result.get("error", "")
+            summary_obj = result.get("summary")
+            if summary_obj is None:
+                raise ValueError("Summariser did not return a Diagnosis object.")
+            summary = summary_obj.incident.summary
+            reasoning_output = result.get("reasoning_output", "")
+            error = result.get("error", "")
 
-        if error:
-            print(f"    Agent error: {error}")
-            is_correct = False
-        else:
-            # Diagnosis correctness
-            is_correct = judge_diagnosis(
-                test_case["telemetry"], test_case["expected_issue"], summary
+            if error:
+                print(f"    Agent error: {error}")
+                is_correct = False
+            else:
+                # Diagnosis correctness
+                is_correct = judge_diagnosis(
+                    test_case["telemetry"], test_case["expected_issue"], summary
+                )
+
+            # Tool usage scoring
+            tool_metrics = extract_tool_usage_metrics(result)
+            tool_score = score_tool_usage(
+                test_case.get("incident_type", "unknown"),
+                tool_metrics["tool_calls_count"],
+                tool_metrics["sop_call_count"],
+                tool_metrics["telemetry_call_count"],
+                tool_metrics["evidence_types_collected"],
+                tool_metrics["verdict_type"],
+                test_case.get("expected_severity", "p3"),
             )
 
-        # Tool usage scoring
-        tool_metrics = extract_tool_usage_metrics(result)
-        tool_score = score_tool_usage(
-            test_case.get("incident_type", "unknown"),
-            tool_metrics["tool_calls_count"],
-            tool_metrics["sop_call_count"],
-            tool_metrics["telemetry_call_count"],
-            tool_metrics["evidence_types_collected"],
-            tool_metrics["verdict_type"],
-            test_case.get("expected_severity", "p3"),
-        )
+            results.append(
+                {
+                    "run": i + 1,
+                    "expected": test_case["expected_issue"],
+                    "incident_type": test_case.get("incident_type", "unknown"),
+                    "severity": test_case.get("expected_severity", "p3"),
+                    "diagnosis_correct": is_correct,
+                    "summary": summary,
+                    "reasoning": reasoning_output[:200] if reasoning_output else "N/A",
+                    "root_cause_found": root_cause_found,
+                    "duration": duration,
+                    "total_tokens": total_tokens,
+                    "tool_score": tool_score,
+                    "tool_metrics": tool_metrics,
+                }
+            )
 
-        results.append(
-            {
-                "run": i + 1,
-                "expected": test_case["expected_issue"],
-                "incident_type": test_case.get("incident_type", "unknown"),
-                "severity": test_case.get("expected_severity", "p3"),
-                "diagnosis_correct": is_correct,
-                "summary": summary,
-                "reasoning": reasoning_output[:200] if reasoning_output else "N/A",
-                "root_cause_found": root_cause_found,
-                "duration": duration,
-                "total_tokens": total_tokens,
-                "tool_score": tool_score,
-                "tool_metrics": tool_metrics,
-            }
-        )
+            print(f"    ✓ Diagnosis Correct: {is_correct}")
 
-        print(f"    ✓ Diagnosis Correct: {is_correct}")
-
-        # except Exception as e:
-        #     print(f"    ✗ Error in run {i + 1}: {e}")
-        #     results.append(
-        #         {
-        #             "run": i + 1,
-        #             "expected": test_case["expected_issue"],
-        #             "incident_type": test_case.get("incident_type", "unknown"),
-        #             "severity": test_case.get("expected_severity", "p3"),
-        #             "diagnosis_correct": False,
-        #             "summary": str(e),
-        #             "reasoning": "",
-        #         }
-        #     )
+        except Exception as e:
+            print(f"    ✗ Error in run {i + 1}: {e}")
+            results.append(
+                {
+                    "run": i + 1,
+                    "expected": test_case["expected_issue"],
+                    "incident_type": test_case.get("incident_type", "unknown"),
+                    "severity": test_case.get("expected_severity", "p3"),
+                    "diagnosis_correct": False,
+                    "summary": str(e),
+                    "reasoning": "",
+                    "root_cause_found": False,
+                    "duration": 0,
+                    "total_tokens": 0,
+                    "tool_score": {"score": 0},
+                    "tool_metrics": {
+                        "tool_calls_count": 0,
+                        "sop_call_count": 0,
+                        "telemetry_call_count": 0,
+                        "evidence_types_collected": [],
+                        "verdict_type": "N/A",
+                    },
+                }
+            )
 
     # Calculate metrics
     correct_count = sum(1 for r in results if r["diagnosis_correct"])
     total_count = len(results)
     accuracy = correct_count / total_count if total_count > 0 else 0
-    avg_tool_score = (
-        sum(r["tool_score"]["score"] for r in results) / total_count
-        if total_count > 0
-        else 0
-    )
-
-    # Calculate average tool metrics
-    avg_tool_calls = (
-        sum(r["tool_metrics"]["tool_calls_count"] for r in results) / total_count
-        if total_count > 0
-        else 0
-    )
-    avg_sop_calls = (
-        sum(r["tool_metrics"]["sop_call_count"] for r in results) / total_count
-        if total_count > 0
-        else 0
-    )
-    avg_telemetry_calls = (
-        sum(r["tool_metrics"]["telemetry_call_count"] for r in results) / total_count
-        if total_count > 0
-        else 0
-    )
 
     print(f"\n{'=' * 60}")
     print(f"TEST RESULTS SUMMARY")
     print(f"{'=' * 60}")
     print(f"Diagnosis Accuracy: {accuracy:.2%} ({correct_count}/{total_count})")
-    print(f"Average Tool Usage Score: {avg_tool_score:.1f}/100")
-    print(f"Average Tool Calls: {avg_tool_calls:.1f}")
-    print(f"Average SOP Calls: {avg_sop_calls:.1f}")
-    print(f"Average Telemetry Calls: {avg_telemetry_calls:.1f}")
     print(f"{'=' * 60}\n")
 
     for r in results:
@@ -498,17 +527,10 @@ def run_tests():
         print(f"         Alert name: {r['expected']}")
         if not r["diagnosis_correct"]:
             print(f"         Summary: {r['summary']}")
-        print(f"         Duration: {r['duration']:.2f} s")
-        print(f"         Total Tokens: {r['total_tokens']}")
-        print(f"         Tool Usage Score: {r['tool_score']['score']:.1f}/100")
-        print(
-            f"         Tool Calls: {r['tool_metrics']['tool_calls_count']} (SOP: {r['tool_metrics']['sop_call_count']}, Telemetry: {r['tool_metrics']['telemetry_call_count']})"
-        )
-        print(
-            f"         Evidence Types: {r['tool_metrics']['evidence_types_collected'] if r['tool_metrics']['evidence_types_collected'] else 'None'}"
-        )
-        print(f"         Verdict Type: {r['tool_metrics']['verdict_type']}")
-
-
+        else:
+            print(f"         Duration: {r['duration']:.2f} s")
+            print(f"         Total Tokens: {r['total_tokens']}")
+            print(format_tool_score_receipt(r["tool_score"], r["tool_metrics"]))
+            print(f"         Verdict Type: {r['tool_metrics']['verdict_type']}")
 if __name__ == "__main__":
     run_tests()
