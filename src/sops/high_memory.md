@@ -1,5 +1,8 @@
 # SOP: High Memory Usage
 
+## Keywords
+OOM, memory leak, memory pressure, container_memory_usage_bytes, container_memory_working_set_bytes, heap exhaustion, garbage collection, out of memory, memory limit exceeded
+
 ## Triggers
 - Memory utilization > 85%
 - Gradual increase in memory over time without release

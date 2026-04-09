@@ -1,5 +1,8 @@
 # SOP: High Latency / Slow Request Processing
 
+## Keywords
+request latency, p95, p99, slow requests, high response time, HTTP timeout, response time degradation, latency spike, slow RPC, slow endpoint
+
 ## Triggers
 - p95/p99 latency exceeds the alert threshold for a sustained period.
 - Requests, RPCs, or message processing complete successfully but are much slower than normal.

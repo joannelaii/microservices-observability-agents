@@ -1,5 +1,8 @@
 # SOP: Network Loss
 
+## Keywords
+packet loss, network unavailable, connectivity lost, pod unreachable, complete network outage, NetworkUnavailable, link down, network down, no connectivity
+
 ## Triggers
 - Pods unable to communicate with each other, services, or external endpoints.
 - Intermittent or complete loss of network connectivity within the cluster.

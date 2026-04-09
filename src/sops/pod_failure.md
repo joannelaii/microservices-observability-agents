@@ -1,5 +1,8 @@
 # SOP: Pod Failure Detection
 
+## Keywords
+ImagePullBackOff, ErrImagePull, pod pending, pod not ready, readiness probe failure, scheduling failure, pod unhealthy, pod failed, pod unknown state, image pull error
+
 ## Triggers
 - Pod in `Pending`, `ImagePullBackOff`, `ErrImagePull`, `Failed`, `Unknown` state.
 - Pod not ready for extended period (readiness probe failing).

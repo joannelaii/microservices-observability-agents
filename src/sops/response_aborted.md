@@ -1,5 +1,8 @@
 # SOP: Response Abort
 
+## Keywords
+502 Bad Gateway, 504 Gateway Timeout, broken pipe, connection reset by peer, upstream timeout, client abort, request aborted, context canceled, incomplete response, ingress upstream failure
+
 ## Triggers
 - HTTP client receives incomplete response or connection reset.
 - Upstream proxy/gateway returns 502 Bad Gateway, 504 Gateway Timeout.

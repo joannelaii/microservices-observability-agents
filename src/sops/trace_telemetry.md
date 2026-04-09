@@ -1,5 +1,8 @@
 # Trace Telemetry Investigation Instructions
 
+## Keywords
+trace investigation, trace ID, distributed tracing, span analysis, trace lookup, OpenTelemetry, Jaeger, Tempo, trace not found, missing trace
+
 Use these instructions whenever `trace_id` is provided.
 
 ## Goal

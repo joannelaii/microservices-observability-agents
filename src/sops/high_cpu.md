@@ -1,5 +1,8 @@
 # SOP: High CPU Utilization
 
+## Keywords
+CPU, CPU degradation, CPU saturation, CPU throttling, high CPU usage, container_cpu_usage_seconds_total, processor overload, CPU spike, CPU limit exceeded, throttled CPU, cpu-degradation, high CPU
+
 ## Triggers
 - CPU utilization > 80% for 5 minutes
 - Sudden spike in CPU usage across multiple pods

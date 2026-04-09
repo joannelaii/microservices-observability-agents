@@ -1,5 +1,8 @@
 # SOP: Database Latency
 
+## Keywords
+DB slow query, database response time, connection pool exhaustion, lock contention, DB latency, mysql, DB query timeout, slow database, database SLO breach
+
 ## Triggers
 - Database query latency > SLO
 - Sudden increase in DB response times

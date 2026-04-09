@@ -1,5 +1,8 @@
 # SOP: Network Corruption
 
+## Keywords
+packet corruption, DNS failure, connection reset, intermittent network, CNI error, network policy denial, checksum error, intermittent timeout, DNS resolution failure, service endpoint unreachable
+
 ## Triggers
 - Pods unable to communicate with each other or with services.
 - Intermittent connection resets, timeouts, or high latency.

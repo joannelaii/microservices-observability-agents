@@ -1,5 +1,8 @@
 # SOP: Pod Killed (OOMKilled, Evicted, Terminated)
 
+## Keywords
+OOMKilled, evicted, exit code 137, SIGKILL, memory limit exceeded, pod terminated, disk pressure, preempted, pod killed, node pressure eviction
+
 ## Triggers
 - Pod status shows `OOMKilled`, `Evicted`, or `Terminated`.
 - Container exits with exit code 137 (SIGKILL) or 143 (SIGTERM).

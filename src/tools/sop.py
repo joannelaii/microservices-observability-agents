@@ -83,15 +83,15 @@ class SOPStore:
             source = doc.metadata.get("source", "unknown")
             if source not in grouped:
                 grouped[source] = {
-                    "score_sum": 0.0,
+                    "best_score": float("inf"),
                     "chunks": [],
                 }
-            grouped[source]["score_sum"] += float(score)
+            grouped[source]["best_score"] = min(grouped[source]["best_score"], float(score))
             grouped[source]["chunks"].append(doc.page_content)
 
         best_source, best_data = min(
             grouped.items(),
-            key=lambda item: float(item[1]["score_sum"]),
+            key=lambda item: float(item[1]["best_score"]),
         )
 
         combined_content = "\n\n---\n\n".join(best_data["chunks"])

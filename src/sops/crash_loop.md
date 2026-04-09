@@ -1,5 +1,8 @@
 # SOP: Pod CrashLoopBackOff
 
+## Keywords
+CrashLoopBackOff, pod restart, container crash, back-off, exit code, init container failure, container restarting, pod keeps restarting
+
 ## Triggers
 - Kubernetes pods repeatedly restarting
 - `CrashLoopBackOff` status observed
