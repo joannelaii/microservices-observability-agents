@@ -5,7 +5,7 @@ from common.util import alert_payload_to_text, classify_alert_payload, llm, usag
 from tools.telemetry import telemetry_service
 from .prompts import MAIN_AGENT_SYSTEM_PROMPT
 
-def run_main_agent_node(state: DiagnosticState) -> DiagnosticState:
+def run_incident_builder_agent_node(state: DiagnosticState) -> DiagnosticState:
     """
     LLM-based input formatter.
     1. Trace flow: Format investigation request from trace_id + time_window.
@@ -17,7 +17,7 @@ def run_main_agent_node(state: DiagnosticState) -> DiagnosticState:
     if state.get("trace_id"):
         trace_id = state["trace_id"]
         query = f"Investigate trace ID: {trace_id}"
-        print(f"[MAIN AGENT] Trace investigation: {query}")
+        print(f"[INCIDENT BUILDER AGENT] Trace investigation: {query}")
         return {**state, "diagnostic_plan": query}
 
     alert_payload = state.get("alert_payload")
@@ -30,10 +30,10 @@ def run_main_agent_node(state: DiagnosticState) -> DiagnosticState:
             ]
             response = llm.invoke(messages)
             query = response.content if hasattr(response, "content") else str(response)
-            print(f"[MAIN AGENT] Alert investigation: {query}...")
+            print(f"[INCIDENT BUILDER AGENT] Alert investigation: {query}...")
             return {**state, "diagnostic_plan": query, **usage_update(state, response)}
         except Exception as e:
-            print(f"[MAIN AGENT] Error processing alert: {e}")
+            print(f"[INCIDENT BUILDER AGENT] Error processing alert: {e}")
             return {**state, "diagnostic_plan": alert_context, "error": str(e)}
 
     return {**state, "diagnostic_plan": "No trace ID or alert payload provided"}
@@ -72,7 +72,7 @@ def triage_node(state: DiagnosticState) -> DiagnosticState:
         incident_type = payload_cls["incident_type"]
         severity = payload_cls["severity"]
         query_window = payload_cls["query_window"]
-        query = f"Investigate {incident_type} issue from alert payload"
+        query = state.get("diagnostic_plan", "No diagnostic plan generated")
 
         triage_metadata = {
             "incident_type": incident_type,
