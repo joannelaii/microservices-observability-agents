@@ -285,11 +285,10 @@ def extract_tool_usage_metrics(result: dict) -> dict:
     """
     Extract tool usage metrics from agent result for scoring.
 
-    REQUIRED OUTPUT FIELDS FROM AGENT:
+    DERIVED FIELDS:
     - reasoning_output: The verdict and investigation narrative
-    - tool_calls_executed: [{"tool": "sop"|"telemetry", "args": {...}, "result": {...}}]
-    - evidence_collected: ["metrics", "logs", "traces", ...]
-    - verdict_type: "ROOT_CAUSE_FOUND" or "BEST_EFFORT"
+    - evidence_collected: Derived from summary.evidence if available
+    - verdict_type: Derived from root_cause_found ("ROOT_CAUSE_FOUND" if True, else "BEST_EFFORT")
     """
     reasoning_messages = result.get("reasoning_messages", [])
     
@@ -307,8 +306,15 @@ def extract_tool_usage_metrics(result: dict) -> dict:
                     telemetry_call_count += 1
                 tool_calls_count += 1
     
-    evidence_types_collected = result.get("evidence_collected", [])
-    verdict_type = result.get("verdict_type", "BEST_EFFORT")
+    # Derive evidence_types_collected from summary.evidence
+    summary = result.get("summary")
+    if summary and hasattr(summary, 'evidence'):
+        evidence_types_collected = summary.evidence
+    else:
+        evidence_types_collected = []
+    
+    # Derive verdict_type from root_cause_found
+    verdict_type = "ROOT_CAUSE_FOUND" if result.get("root_cause_found", False) else "BEST_EFFORT"
     
     return {
         "tool_calls_count": tool_calls_count,
@@ -330,14 +336,15 @@ def run_tests():
     # Use the single test case
     test_case = [a for a in test_cases if a["alert"].get("state") == "firing"][0]
     payload = build_incident_payload(incident_key(test_case["alert"]), [test_case["alert"]])
+    total_times = 1
 
     print(f"Running test for Kafka issue detection")
     print(f"  Service: {test_case['service_name']}")
     print(f"  Expected Incident Type: {test_case.get('incident_type', 'unknown')}")
-    print(f"  Running 10 times to measure accuracy...")
+    print(f"  Running {total_times} times to measure accuracy...")
 
-    for i in range(1):
-        print(f"  Run {i + 1}/10")
+    for i in range(total_times):
+        print(f"  Run {i + 1}/{total_times}")
         graph = _get_graph()
         alert_context = _payload_to_alert_context(payload)
         service_name = payload.get("service_name") or "opentelemetry-collector"
@@ -466,7 +473,7 @@ def run_tests():
         print(f"         Total Tokens: {r['total_tokens']}")
         print(f"         Tool Usage Score: {r['tool_score']['score']:.1f}/100")
         print(f"         Tool Calls: {r['tool_metrics']['tool_calls_count']} (SOP: {r['tool_metrics']['sop_call_count']}, Telemetry: {r['tool_metrics']['telemetry_call_count']})")
-        print(f"         Evidence Types: {', '.join(r['tool_metrics']['evidence_types_collected']) if r['tool_metrics']['evidence_types_collected'] else 'None'}")
+        print(f"         Evidence Types: {r['tool_metrics']['evidence_types_collected'] if r['tool_metrics']['evidence_types_collected'] else 'None'}")
         print(f"         Verdict Type: {r['tool_metrics']['verdict_type']}")
 
 

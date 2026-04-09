@@ -48,9 +48,6 @@ class DiagnosticState(TypedDict):
     reasoning_step_count: int
     root_cause_found: bool
     next_action: str
-    tool_calls_executed: Optional[List[dict[str, Any]]]
-    evidence_collected: Optional[List[str]]
-    verdict_type: Optional[str]
 
     # Final output
     best_effort: Optional[str]
