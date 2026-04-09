@@ -8,7 +8,7 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_ollama import OllamaEmbeddings, ChatOllama
 from langchain_core.language_models.chat_models import BaseChatModel
 
-OLLAMA_MODEL = "qwen2.5-coder"
+OLLAMA_MODEL = "llama3.1:8b"
 
 
 class LLM_EMBEDDING(TypedDict):

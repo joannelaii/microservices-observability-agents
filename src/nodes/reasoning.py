@@ -31,46 +31,47 @@ _DEFAULT_TRACE_KEYS = {
 _DEFAULT_LOG_KEYS = {"labels", "line"}
 
 def run_reasoning_node(state: DiagnosticState) -> DiagnosticState:
+    print("\n[REASONING]")
     reasoning_messages = list(state.get("reasoning_messages") or [])
     step_count = int(state.get("reasoning_step_count", 0) or 0)
     sop_content = state.get("sop_content") or state.get("sop_guidance") or "No SOP available."
     code_analysis = state.get("code_analysis") or ""
     code_update = f"""
-## Code Analysis Update
-{code_analysis}
+                ## Code Analysis Update
+                {code_analysis}
 
-Use this new evidence in the next step of diagnosis.
-""".strip()
+                Use this new evidence in the next step of diagnosis.
+                """.strip()
 
     if not reasoning_messages:
         reasoning_messages = [
             SystemMessage(content=REASONING_AGENT_SYSTEM_PROMPT),
             HumanMessage(
                 content=f"""
-## Alarm Context
-Service reported in alert: {state.get("service_name", "unknown")}
-Trace ID from alert: {state.get("trace_id", "N/A")}
-Start time: {state.get("start_time", "N/A")}
-End time: {state.get("end_time", "N/A")}
-Incident type: {(state.get("triage_metadata") or {}).get("incident_type", "unknown")}
-Severity: {(state.get("triage_metadata") or {}).get("severity", "unknown")}
+                    ## Alarm Context
+                    Service reported in alert: {state.get("service_name", "unknown")}
+                    Trace ID from alert: {state.get("trace_id", "N/A")}
+                    Start time: {state.get("start_time", "N/A")}
+                    End time: {state.get("end_time", "N/A")}
+                    Incident type: {(state.get("triage_metadata") or {}).get("incident_type", "unknown")}
+                    Severity: {(state.get("triage_metadata") or {}).get("severity", "unknown")}
 
-## Initial Telemetry Snapshot
-{state.get("telemetry", "N/A")}
+                    ## Initial Telemetry Snapshot
+                    {state.get("telemetry", "N/A")}
 
-## SOP Document
-{sop_content}
+                    ## SOP Document
+                    {sop_content}
 
-## Code Analysis
-{state.get("code_analysis", "N/A")}
+                    ## Code Analysis
+                    {state.get("code_analysis", "N/A")}
 
-If Start time and End time are available, use those exact values in telemetry tool calls.
-If only a Trace ID is available, use a trace_id-only telemetry tool call and do not invent timestamps.
-If a Trace ID is provided, investigate that exact trace instead of searching for unrelated candidate traces.
-If the affected service is known, always include service in telemetry tool calls.
-If the incident appears latency-related, pass problem_type="latency" to telemetry.
-If the incident appears error-related, pass problem_type="error" to telemetry.
-"""
+                    If Start time and End time are available, use those exact values in telemetry tool calls.
+                    If only a Trace ID is available, use a trace_id-only telemetry tool call and do not invent timestamps.
+                    If a Trace ID is provided, investigate that exact trace instead of searching for unrelated candidate traces.
+                    If the affected service is known, always include service in telemetry tool calls.
+                    If the incident appears latency-related, pass problem_type="latency" to telemetry.
+                    If the incident appears error-related, pass problem_type="error" to telemetry.
+                    """
             ),
         ]
     has_code_update = any(
@@ -109,6 +110,8 @@ If the incident appears error-related, pass problem_type="error" to telemetry.
         }
 
     reasoning_llm = llm.bind_tools(_REASONING_TOOLS)
+    model_name = getattr(reasoning_llm, "model", None) or getattr(reasoning_llm, "model_name", None) or "unknown"
+    print("reasoning_agent model:", model_name)
     response = reasoning_llm.invoke(reasoning_messages)
 
     print("tool_calls:", response.tool_calls)
@@ -128,6 +131,7 @@ If the incident appears error-related, pass problem_type="error" to telemetry.
         upper = text.upper()
         updates["root_cause_found"] = "VERDICT: ROOT_CAUSE_FOUND" in upper
 
+    print(f"{updates.get("root_cause_found", "no key in updates")}\n\n{updates.get("reasoning_output", "no key in updates")}\n\n")
     return updates
 
 

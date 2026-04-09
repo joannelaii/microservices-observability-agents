@@ -40,4 +40,5 @@ Based on the ROOT_CAUSE_FOUND flag above, format your response according to the 
     response = llm.invoke(messages)
     summary = Diagnosis.model_validate_json(response.content)
     print("[Summariser]\n")
+    print(summary, end="\n\n")
     return {**state, "summary": summary, **usage_update(state, response)}
